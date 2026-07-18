@@ -67,3 +67,9 @@ variable "website_repo_name" {
   description = "GitHub repo name for the company website"
   type        = string
 }
+
+variable "context_bucket" {
+  description = "S3 bucket for AI context storage"
+  type        = string
+  default     = "stellar-global-ai-context"
+}

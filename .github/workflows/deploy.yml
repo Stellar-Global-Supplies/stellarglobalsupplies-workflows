@@ -142,6 +142,7 @@ jobs:
           echo "outputs_frontend_bucket=$(terraform output -raw frontend_bucket)" >> "$GITHUB_OUTPUT"
           echo "outputs_cloudfront_distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
           echo "outputs_api_endpoint=$(terraform output -raw api_endpoint)" >> "$GITHUB_OUTPUT"
+          echo "outputs_assets_cloudfront_domain=$(terraform output -raw assets_cloudfront_domain)" >> "$GITHUB_OUTPUT"
           terraform output -json > tf_outputs.json
 
   backend:
@@ -259,10 +260,6 @@ jobs:
     name: Build React App & Deploy
     runs-on: ubuntu-latest
     needs: [changes, terraform, backend]
-    env:
-      FRONTEND_S3_BUCKET: ${{ needs.terraform.outputs.frontend_bucket || secrets.FRONTEND_S3_BUCKET }}
-      CLOUDFRONT_DISTRIBUTION_ID: ${{ needs.terraform.outputs.cloudfront_distribution_id || secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-      API_GATEWAY_URL: ${{ needs.terraform.outputs.api_endpoint || secrets.API_GATEWAY_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -303,6 +300,32 @@ jobs:
           role-to-assume:    ${{ secrets.AWS_ROLE_ARN }}
           role-session-name: observe-bootstrap
           aws-region:        ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Resolve Deployment Outputs
+        run: |
+          terraform -chdir=terraform init
+          FRONTEND_S3_BUCKET="${{ needs.terraform.outputs.frontend_bucket }}"
+          CLOUDFRONT_DISTRIBUTION_ID="${{ needs.terraform.outputs.cloudfront_distribution_id }}"
+          API_GATEWAY_URL="${{ needs.terraform.outputs.api_endpoint }}"
+
+          if [ -z "$FRONTEND_S3_BUCKET" ]; then
+            FRONTEND_S3_BUCKET="$(terraform -chdir=terraform output -raw frontend_bucket)"
+          fi
+          if [ -z "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+            CLOUDFRONT_DISTRIBUTION_ID="$(terraform -chdir=terraform output -raw cloudfront_distribution_id)"
+          fi
+          if [ -z "$API_GATEWAY_URL" ]; then
+            API_GATEWAY_URL="$(terraform -chdir=terraform output -raw api_endpoint)"
+          fi
+
+          echo "FRONTEND_S3_BUCKET=$FRONTEND_S3_BUCKET" >> "$GITHUB_ENV"
+          echo "CLOUDFRONT_DISTRIBUTION_ID=$CLOUDFRONT_DISTRIBUTION_ID" >> "$GITHUB_ENV"
+          echo "API_GATEWAY_URL=$API_GATEWAY_URL" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

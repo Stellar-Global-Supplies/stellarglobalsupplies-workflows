@@ -149,9 +149,7 @@ resource "aws_s3_bucket_policy" "assets_cloudfront" {
   })
 }
 
-data "aws_s3_bucket" "context" {
-  bucket = "stellar-global-ai-context"
-}
+# Context bucket is referenced by name (may not exist yet)
 
 # ─────────────────────────────────────────────
 # CLOUDFRONT OAC for frontend
@@ -381,7 +379,7 @@ locals {
     SUPABASE_SERVICE_KEY      = var.supabase_service_key
     ASSETS_BUCKET             = aws_s3_bucket.assets.bucket
     ASSETS_CLOUDFRONT_URL     = "https://${aws_cloudfront_distribution.assets.domain_name}"
-    CONTEXT_BUCKET            = data.aws_s3_bucket.context.bucket
+    CONTEXT_BUCKET            = var.context_bucket
     BEDROCK_TEXT_MODEL        = "amazon.nova-pro-v1:0"
     BEDROCK_IMAGE_MODEL       = "amazon.nova-canvas-v1:0"
     SENDER_EMAIL              = var.sender_email
