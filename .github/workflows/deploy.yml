@@ -335,27 +335,18 @@ jobs:
           cache-dependency-path: frontend/package.json
 
       - name: Install dependencies
-        if: needs.changes.outputs.frontend == 'true'
         working-directory: frontend
         run: npm ci
 
-      - name: Write .env
-        if: needs.changes.outputs.frontend == 'true'
-        working-directory: frontend
-        run: |
-          cat > .env.production << EOF
-          VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
-          VITE_API_URL=${{ env.API_GATEWAY_URL }}
-          EOF
-
       - name: Build
-        if: needs.changes.outputs.frontend == 'true'
         working-directory: frontend
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_API_URL: ${{ env.API_GATEWAY_URL }}
         run: npm run build
 
       - name: Deploy to S3
-        if: needs.changes.outputs.frontend == 'true'
         working-directory: frontend
         run: |
           BUCKET="${{ env.FRONTEND_S3_BUCKET }}"
@@ -372,7 +363,6 @@ jobs:
             --no-cli-pager
 
       - name: Invalidate CloudFront cache
-        if: needs.changes.outputs.frontend == 'true'
         run: |
           aws cloudfront create-invalidation \
             --distribution-id "${{ env.CLOUDFRONT_DISTRIBUTION_ID }}" \
