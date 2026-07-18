@@ -36,19 +36,16 @@ def handler(event, context):
     order_uuid = event.get("orderUuid") or ""
     context_text = event.get("contextText", "")
 
-    # social_workflow_id is NOT NULL with FK to social_workflows — must be a real UUID
+    # social_workflow_id: optional traceability field — FK and NOT NULL dropped via migration
     social_workflow_id = (
         event.get("socialWorkflowId")
         or event.get("social_workflow_id")
         or event.get("workflowRunId")
         or event.get("workflow_run_id")
-        or ""
+        or None
     )
 
     print(f"[generate_post] START post_type={post_type!r} repo_name={repo_name!r} order_id={order_id!r} social_workflow_id={social_workflow_id!r}")
-
-    if not social_workflow_id:
-        raise ValueError("[generate_post] social_workflow_id is required (NOT NULL FK) but was not provided in the event")
 
     # ── Dedup by order id ─────────────────────────────────────
     if post_type == "product" and order_id:
