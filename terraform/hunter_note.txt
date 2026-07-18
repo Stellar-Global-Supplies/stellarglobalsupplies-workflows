@@ -1,0 +1,6 @@
+  # Add this line inside locals.lambda_env in main.tf:
+  # HUNTER_API_KEY_PARAM = "/${var.project_name}/hunter/api_key"
+
+  # This file is intentionally a note — the value is already in main.tf lambda_env block.
+  # The Hunter.io API key is stored in SSM and fetched at runtime by hunter_client.py
+  # using get_ssm(os.environ["HUNTER_API_KEY_PARAM"])

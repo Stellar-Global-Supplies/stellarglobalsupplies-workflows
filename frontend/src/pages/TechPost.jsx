@@ -1,0 +1,115 @@
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { startWorkflow, getSocialPosts } from '../services/api'
+import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
+import { Code2, Play, Image as ImgIcon } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { formatDistanceToNow } from 'date-fns'
+
+export default function TechPost() {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({ repo_name: '', prompt: '' })
+  const [running, setRunning] = useState(false)
+  const [tab, setTab] = useState('launch')
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['social-posts', 'tech'],
+    queryFn:  () => getSocialPosts('type=tech&order=created_at.desc&limit=50'),
+    refetchInterval: 15_000,
+  })
+  const posts = data?.posts || []
+
+  async function launch() {
+    setRunning(true)
+    try {
+      const res = await startWorkflow('social-tech', { type: 'tech', ...form })
+      toast.success(`Tech post workflow started — ${res.workflowRunId?.slice(0,8)}`)
+      qc.invalidateQueries(['social-posts'])
+      setTab('posts')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+      <PageHeader icon={Code2} title="Tech Showcase Posts"
+        sub="Reads reponame/ai_context.md from S3 → AI generates post → approval → post to all platforms" />
+
+      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
+        {['launch','posts'].map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors
+              ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            {t === 'posts' ? `Tech Posts (${posts.length})` : 'Launch Workflow'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'launch' && (
+        <div className="card p-6 max-w-lg">
+          <h2 className="font-semibold text-navy mb-4">New Tech Showcase Post</h2>
+          <div className="space-y-4">
+            <FormField label="Repository Name"
+              hint="The workflow reads s3://your-bucket/{repo_name}/ai_context.md">
+              <input value={form.repo_name} onChange={e => setForm(f => ({...f, repo_name: e.target.value}))}
+                className="input font-mono" placeholder="e.g. workflows-platform" />
+            </FormField>
+            <FormField label="Custom Prompt (optional)"
+              hint="Extra direction for the AI beyond what's in ai_context.md">
+              <textarea value={form.prompt} onChange={e => setForm(f => ({...f, prompt: e.target.value}))}
+                className="input resize-none h-24"
+                placeholder="Focus on the approval workflow feature, mention Step Functions…" />
+            </FormField>
+          </div>
+
+          <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
+            <strong>S3 context file format:</strong> Place a markdown file at
+            <code className="bg-slate-200 px-1 rounded mx-1">{'{repo_name}/ai_context.md'}</code>
+            in your assets bucket. The AI will use it to write an accurate tech showcase post.
+          </div>
+
+          <button onClick={launch} disabled={running} className="btn-primary w-full justify-center py-2.5 mt-5">
+            {running ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Starting…</>
+              : <><Play size={15} /> Generate Tech Post</>}
+          </button>
+        </div>
+      )}
+
+      {tab === 'posts' && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-slate-100 text-sm font-medium text-navy">Tech Posts ({posts.length})</div>
+          {isLoading ? (
+            <div className="p-4 space-y-3">{Array(4).fill(0).map((_,i) => <Skeleton key={i} className="h-20"/>)}</div>
+          ) : posts.length === 0 ? (
+            <EmptyState icon={Code2} title="No tech posts yet" sub="Launch a workflow to create your first tech showcase" />
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {posts.map(post => (
+                <div key={post.id} className="flex gap-4 px-5 py-4 hover:bg-slate-50 transition-colors">
+                  {post.image_url
+                    ? <img src={post.image_url} alt="" className="w-16 h-16 rounded-lg object-cover flex-shrink-0 border border-slate-100" />
+                    : <div className="w-16 h-16 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0"><ImgIcon size={20} className="text-slate-300" /></div>
+                  }
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-medium text-navy truncate">{post.title || 'Tech Post'}</span>
+                      <StatusBadge status={post.status} />
+                    </div>
+                    <p className="text-xs text-slate-500 line-clamp-2">{post.content}</p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
+                      <span>{formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}</span>
+                      {post.repo_name && <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{post.repo_name}</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

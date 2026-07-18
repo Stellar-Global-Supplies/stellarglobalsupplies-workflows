@@ -1,0 +1,67 @@
+{
+  "Comment": "Social Media Product Post Workflow - Get orders, generate image+content, approve, post",
+  "StartAt": "GetOrders",
+  "States": {
+    "GetOrders": {
+      "Type": "Task",
+      "Resource": "${GetOrdersArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 2, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "GenerateSocialPost"
+    },
+    "GenerateSocialPost": {
+      "Type": "Task",
+      "Resource": "${GeneratePostArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "IsPostDuplicate"
+    },
+    "IsPostDuplicate": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.isDuplicate",
+          "BooleanEquals": true,
+          "Next": "DuplicatePost"
+        }
+      ],
+      "Default": "WaitForPostApproval"
+    },
+    "DuplicatePost": {
+      "Type": "Succeed"
+    },
+    "WaitForPostApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${CreateApprovalArn}",
+        "Payload": {
+          "taskToken.$": "$$.Task.Token",
+          "workflowType": "social_product",
+          "data.$": "$"
+        }
+      },
+      "ResultPath": "$.approvalResult",
+      "TimeoutSeconds": 604800,
+      "HeartbeatSeconds": 86400,
+      "Catch": [
+        {"ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"], "Next": "ApprovalExpired", "ResultPath": "$.error"},
+        {"ErrorEquals": ["Rejected"], "Next": "PostRejected", "ResultPath": "$.error"}
+      ],
+      "Next": "PostToPlatforms"
+    },
+    "PostToPlatforms": {
+      "Type": "Task",
+      "Resource": "${PostToPlatformsArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 10, "MaxAttempts": 2}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "End": true
+    },
+    "PostRejected":    {"Type": "Succeed"},
+    "ApprovalExpired": {"Type": "Succeed"},
+    "WorkflowFailed":  {"Type": "Fail", "Error": "WorkflowError"}
+  }
+}

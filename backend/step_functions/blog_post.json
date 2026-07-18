@@ -1,0 +1,45 @@
+{
+  "Comment": "Blog Post Workflow - Generate blog+image, approve, create GitHub PR",
+  "StartAt": "GenerateBlog",
+  "States": {
+    "GenerateBlog": {
+      "Type": "Task",
+      "Resource": "${GenerateBlogArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "WaitForBlogApproval"
+    },
+    "WaitForBlogApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${CreateApprovalArn}",
+        "Payload": {
+          "taskToken.$": "$$.Task.Token",
+          "workflowType": "blog",
+          "data.$": "$"
+        }
+      },
+      "ResultPath": "$.approvalResult",
+      "TimeoutSeconds": 604800,
+      "HeartbeatSeconds": 86400,
+      "Catch": [
+        {"ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"], "Next": "ApprovalExpired", "ResultPath": "$.error"},
+        {"ErrorEquals": ["Rejected"], "Next": "BlogRejected", "ResultPath": "$.error"}
+      ],
+      "Next": "CreateGitHubPR"
+    },
+    "CreateGitHubPR": {
+      "Type": "Task",
+      "Resource": "${CreateGitHubPRArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 10, "MaxAttempts": 2}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "End": true
+    },
+    "BlogRejected":    {"Type": "Succeed"},
+    "ApprovalExpired": {"Type": "Succeed"},
+    "WorkflowFailed":  {"Type": "Fail", "Error": "WorkflowError"}
+  }
+}

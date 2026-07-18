@@ -1,0 +1,59 @@
+{
+  "Comment": "Tech Post Workflow - Read S3 context, generate post, approve, post to platforms",
+  "StartAt": "ReadS3Context",
+  "States": {
+    "ReadS3Context": {
+      "Type": "Task",
+      "Resource": "${ReadS3ContextArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 2, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "GenerateTechPost"
+    },
+    "GenerateTechPost": {
+      "Type": "Task",
+      "Resource": "${GeneratePostArn}",
+      "Parameters": {
+        "type": "tech",
+        "prompt.$": "$.prompt",
+        "repo_name.$": "$.repo_name",
+        "contextText.$": "$.contextText",
+        "workflowRunId.$": "$.workflowRunId"
+      },
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "WaitForTechPostApproval"
+    },
+    "WaitForTechPostApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${CreateApprovalArn}",
+        "Payload": {
+          "taskToken.$": "$$.Task.Token",
+          "workflowType": "social_tech",
+          "data.$": "$"
+        }
+      },
+      "ResultPath": "$.approvalResult",
+      "TimeoutSeconds": 604800,
+      "HeartbeatSeconds": 86400,
+      "Catch": [
+        {"ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"], "Next": "ApprovalExpired", "ResultPath": "$.error"},
+        {"ErrorEquals": ["Rejected"], "Next": "PostRejected", "ResultPath": "$.error"}
+      ],
+      "Next": "PostToPlatforms"
+    },
+    "PostToPlatforms": {
+      "Type": "Task",
+      "Resource": "${PostToPlatformsArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 10, "MaxAttempts": 2}],
+      "End": true
+    },
+    "PostRejected":    {"Type": "Succeed"},
+    "ApprovalExpired": {"Type": "Succeed"},
+    "WorkflowFailed":  {"Type": "Fail", "Error": "WorkflowError"}
+  }
+}
