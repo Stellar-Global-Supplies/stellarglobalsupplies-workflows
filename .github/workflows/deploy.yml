@@ -58,6 +58,15 @@ jobs:
           echo "job=${GITHUB_JOB}"
           echo "role_arn=${{ secrets.AWS_ROLE_ARN }}"
 
+      - name: Debug OIDC Claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')"
+          payload="$(printf '%s' "$token" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r '{aud, sub, repository, ref, workflow, job_workflow_ref}')"
+          echo "$payload"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -135,6 +144,15 @@ jobs:
           echo "workflow=${GITHUB_WORKFLOW}"
           echo "job=${GITHUB_JOB}"
           echo "role_arn=${{ secrets.AWS_ROLE_ARN }}"
+
+      - name: Debug OIDC Claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')"
+          payload="$(printf '%s' "$token" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r '{aud, sub, repository, ref, workflow, job_workflow_ref}')"
+          echo "$payload"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -227,6 +245,15 @@ jobs:
           echo "workflow=${GITHUB_WORKFLOW}"
           echo "job=${GITHUB_JOB}"
           echo "role_arn=${{ secrets.AWS_ROLE_ARN }}"
+
+      - name: Debug OIDC Claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')"
+          payload="$(printf '%s' "$token" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r '{aud, sub, repository, ref, workflow, job_workflow_ref}')"
+          echo "$payload"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
