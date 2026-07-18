@@ -24,6 +24,9 @@ def handler(event, context):
     repo_name = event.get("repo_name", "")
     order_id  = event.get("orderKey") or event.get("orderId") or event.get("order_id") or ""
     order_uuid = event.get("orderUuid") or ""
+    context_text = event.get("contextText", "")
+
+    print(f"[generate_post] START post_type={post_type!r} repo_name={repo_name!r} order_id={order_id!r}")
 
     # ── Dedup by order id / uuid ───────────────────────────────
     if post_type == "product":
@@ -47,9 +50,11 @@ def handler(event, context):
                     if "order_uuid" not in str(exc):
                         raise
             if rows:
+                print(f"[generate_post] duplicate found — skipping")
                 return {**event, "isDuplicate": True, "existingPostId": rows[0]["id"]}
 
     # ── Generate text content ─────────────────────────────────
+    print(f"[generate_post] calling Bedrock to generate {post_type} post content")
     if post_type == "product":
         gen_prompt = f"""
 Create engaging social media posts for Stellar Global Supplies about this product:
@@ -68,10 +73,11 @@ Return JSON:
   "image_prompt": "detailed prompt for generating a product showcase image"
 }}"""
     else:
+        context_section = f"\n\nPlatform context:\n{context_text}" if context_text else ""
         gen_prompt = f"""
 Create an engaging tech/showcase social media post for Stellar Global Supplies about our platform.
 {"Custom prompt: " + prompt if prompt else "Highlight our workflow automation capabilities."}
-Repo: {repo_name}
+Repo: {repo_name}{context_section}
 
 Return JSON:
 {{
@@ -83,6 +89,7 @@ Return JSON:
 }}"""
 
     content_data = generate_json(gen_prompt, system=SYSTEM, max_tokens=1200)
+    print(f"[generate_post] Bedrock text generation complete, title={content_data.get('title','')!r}")
     content_key = f"generated-content/social-posts/{post_type}/{uuid.uuid4()}.json"
     content_url = upload_json_to_s3({
         "type": post_type,
@@ -102,18 +109,21 @@ Return JSON:
     image_url = None
     img_key   = None
 
+    print(f"[generate_post] starting image generation (non-blocking)")
     try:
         image_bytes = generate_image(img_prompt)
         if image_bytes:
             ext, content_type = image_ext_and_type(image_bytes)
             img_key = f"social-posts/{post_type}/{uuid.uuid4()}{ext}"
             image_url = upload_image_to_s3(image_bytes, img_key, content_type=content_type)
+            print(f"[generate_post] image uploaded: {img_key}")
         else:
             print("[generate_post] generate_image returned None — saving without image")
     except Exception as e:
         print(f"[generate_post] image step failed ({e}) — saving without image")
 
     # ── Save to Supabase ──────────────────────────────────────
+    print(f"[generate_post] saving post to Supabase")
     db  = get_client()
     workflow_run_id = event.get("workflowRunId")
 
@@ -171,6 +181,7 @@ Return JSON:
                 if req_col in row and req_col not in insert_row:
                     insert_row[req_col] = row[req_col]
 
+    print(f"[generate_post] DONE postId={saved['id']}")
     return {
         **event,
         "isDuplicate": False,

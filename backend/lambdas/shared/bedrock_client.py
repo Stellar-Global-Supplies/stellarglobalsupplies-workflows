@@ -17,12 +17,11 @@ import boto3
 import json
 import base64
 import os
-import logging
+import socket
+import threading
 import urllib.request
 import urllib.parse
 from typing import Optional
-
-log = logging.getLogger(__name__)
 
 _bedrock_runtime = None
 
@@ -67,7 +66,7 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
             return json.loads(text)
         except json.JSONDecodeError as exc:
             last_exc = exc
-            log.warning(f"[bedrock] generate_json attempt {attempt+1} returned invalid JSON: {text[:200]}")
+            print(f"[bedrock] generate_json attempt {attempt+1} returned invalid JSON: {text[:200]}")
     raise ValueError(f"Nova returned invalid JSON after 2 attempts: {last_exc}") from last_exc
 
 
@@ -84,9 +83,32 @@ def _pollinations(prompt: str, width: int = 1024, height: int = 1024) -> Optiona
         f"?width={w}&height={h}&model=flux&nologo=true&enhance=false"
     )
     req = urllib.request.Request(url, headers={"User-Agent": "StellarWorkflows/1.0"})
-    with urllib.request.urlopen(req, timeout=60) as resp:   # follows redirect automatically
-        data = resp.read()
-    if len(data) < 1000:                                    # sanity: real image > 1KB
+
+    # Hard 20-second wall-clock deadline — urllib's timeout only guards each socket
+    # read op, so a server that trickles data could stall indefinitely without this.
+    result_holder: list = []
+    error_holder:  list = []
+
+    def _fetch():
+        try:
+            # socket timeout covers connect + idle-read; 20 s is generous for Pollinations
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                result_holder.append(resp.read())
+        except Exception as exc:
+            error_holder.append(exc)
+
+    t = threading.Thread(target=_fetch, daemon=True)
+    t.start()
+    t.join(timeout=20)          # hard wall-clock cap
+
+    if t.is_alive():
+        # Thread still blocked — give up and let SVG fallback handle it
+        raise TimeoutError("Pollinations did not respond within 20 seconds")
+    if error_holder:
+        raise error_holder[0]
+
+    data = result_holder[0]
+    if len(data) < 1000:        # sanity: real image > 1 KB
         raise ValueError(f"Pollinations returned suspiciously small payload: {len(data)} bytes")
     return data
 
@@ -181,13 +203,13 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
 
     # ── 1. Pollinations.AI (free, no key) ────────────────────
     try:
-        log.info("[bedrock] trying Pollinations.AI (free)")
+        print("[bedrock] trying Pollinations.AI (free)")
         data = _pollinations(prompt, width, height)
         if data:
-            log.info(f"[bedrock] Pollinations OK ({len(data):,} bytes)")
+            print(f"[bedrock] Pollinations OK ({len(data):,} bytes)")
             return data
     except Exception as e:
-        log.warning(f"[bedrock] Pollinations failed ({str(e)[:120]}) — trying Bedrock")
+        print(f"[bedrock] Pollinations failed ({str(e)[:120]}) — trying Bedrock")
 
     # ── 2-4. Bedrock models ───────────────────────────────────
     bedrock_models = [
@@ -198,19 +220,19 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
     client = get_bedrock_runtime()
     for name, fn in bedrock_models:
         try:
-            log.info(f"[bedrock] trying Bedrock model: {name}")
+            print(f"[bedrock] trying Bedrock model: {name}")
             data = fn(client, prompt, width, height)
             if data:
-                log.info(f"[bedrock] {name} OK")
+                print(f"[bedrock] {name} OK")
                 return data
         except Exception as e:
             msg = str(e)
             if any(k in msg for k in _SKIP_ERRORS):
-                log.warning(f"[bedrock] {name} unavailable ({msg[:120]}) — next")
+                print(f"[bedrock] {name} unavailable ({msg[:120]}) — next")
             else:
-                log.error(f"[bedrock] {name} error ({msg[:200]}) — next")
+                print(f"[bedrock] {name} error ({msg[:200]}) — next")
             continue
 
     # ── 5. Branded SVG placeholder (always works) ─────────────
-    log.warning("[bedrock] all AI models failed — using branded SVG placeholder")
-    return _branded_svg_placeholder(prompt, width, height) 
+    print("[bedrock] all AI models failed — using branded SVG placeholder")
+    return _branded_svg_placeholder(prompt, width, height)

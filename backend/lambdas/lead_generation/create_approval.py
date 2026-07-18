@@ -4,7 +4,7 @@ Saves the Step Functions task token and pending item to the approval_queue table
 This lambda is invoked with waitForTaskToken - the Step Function will pause until
 a human approves/rejects via the API.
 """
-import sys, os
+import sys, os, uuid
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -28,7 +28,15 @@ def handler(event, context):
 
     # Determine reference_id
     if workflow_type == "lead_approval":
-        reference_id = data.get("leadId")
+        # NOTE: lead_approval fires BEFORE save_lead, so leadId does not exist yet.
+        # Use workflowRunId if available, otherwise generate a stable placeholder UUID
+        # so the approval_queue reference_id column (uuid type) never receives "None".
+        raw_lead_id = data.get("leadId")
+        reference_id = (
+            raw_lead_id
+            or data.get("workflowRunId")
+            or str(uuid.uuid4())
+        )
         lead = data.get("lead", {})
         payload = {
             "lead":      lead,
