@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS social_posts (
   status          TEXT NOT NULL DEFAULT 'draft'
                   CHECK (status IN ('draft','approved','posting','posted','rejected','partial')),
   order_id        TEXT,
+  order_uuid      UUID,
   repo_name       TEXT,
   prompt          TEXT,
   post_results    JSONB DEFAULT '{}',
@@ -64,10 +65,44 @@ CREATE TABLE IF NOT EXISTS social_posts (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX idx_social_posts_order_unique
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS type TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS content TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS image_s3_key TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS platforms JSONB DEFAULT '{"facebook":false,"instagram":false,"linkedin":false}';
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS status TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS order_uuid UUID;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS repo_name TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS prompt TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS post_results JSONB DEFAULT '{}';
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS posted_at TIMESTAMPTZ;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS workflow_run_id UUID;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE UNIQUE INDEX IF NOT EXISTS idx_social_posts_order_unique
   ON social_posts(order_id) WHERE order_id IS NOT NULL;
-CREATE INDEX idx_social_posts_type   ON social_posts(type);
-CREATE INDEX idx_social_posts_status ON social_posts(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_social_posts_order_uuid_unique
+  ON social_posts(order_uuid) WHERE order_uuid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_social_posts_type   ON social_posts(type);
+CREATE INDEX IF NOT EXISTS idx_social_posts_status ON social_posts(status);
 
 -- ============================================================
 -- BLOG POSTS

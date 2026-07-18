@@ -25,11 +25,11 @@ def handler(event, context):
 
     # Check for duplicate by order_id (product posts only)
     if post_type == "product":
-        order_id = event.get("orderId", "")
-        if order_id:
+        order_uuid = event.get("orderUuid") or event.get("orderId", "")
+        if order_uuid:
             db   = get_client()
             rows = db.select("social_posts",
-                             params=f"order_id=eq.{order_id}&type=eq.product&limit=1")
+                             params=f"order_uuid=eq.{order_uuid}&type=eq.product&limit=1")
             if rows:
                 return {
                     **event,
@@ -92,7 +92,8 @@ Return JSON:
         "image_s3_key":  img_key,
         "platforms":     {"facebook": True, "instagram": True, "linkedin": True},
         "status":        "draft",
-        "order_id":      event.get("orderId") if post_type == "product" else None,
+        "order_id":      event.get("orderDisplayId") if post_type == "product" else None,
+        "order_uuid":    event.get("orderUuid") if post_type == "product" else None,
         "repo_name":     repo_name if post_type == "tech" else None,
         "prompt":        prompt,
         "workflow_run_id": event.get("workflowRunId"),

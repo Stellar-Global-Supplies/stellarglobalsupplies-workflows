@@ -11,7 +11,7 @@ from shared.supabase_client import get_client
 
 def handler(event, context):
     """
-    Input: { "order_id": "ORD-123" } OR { "limit": 5, "product_type": "industrial" }
+    Input: { "order_id": "<uuid>" } OR { "limit": 5, "product_type": "industrial" }
     """
     db       = get_client()
     order_id = event.get("order_id")
@@ -19,8 +19,9 @@ def handler(event, context):
     if order_id:
         rows = db.select("orders", params=f"id=eq.{order_id}&limit=1")
         if not rows:
-            # Try by order number field
-            rows = db.select("orders", params=f"order_number=eq.{order_id}&limit=1")
+            # Support short UUID prefixes from the UI by scanning recent rows locally.
+            recent = db.select("orders", params="select=*&order=created_at.desc&limit=100")
+            rows = [r for r in recent if str(r.get("id", "")).startswith(str(order_id))]
     else:
         limit        = event.get("limit", 1)
         product_type = event.get("product_type", "")
@@ -34,7 +35,7 @@ def handler(event, context):
         # Return mock data for demo if no orders table or no orders yet
         rows = [{
             "id":               event.get("order_id", "DEMO-001"),
-            "order_number":     event.get("order_id", "DEMO-001"),
+            "order_display_id": str(event.get("order_id", "DEMO-001"))[:8],
             "product_name":     event.get("product_name", "Industrial Cleaning Supplies Bundle"),
             "product_category": event.get("product_type", "Industrial"),
             "quantity":         500,
@@ -43,8 +44,11 @@ def handler(event, context):
         }]
 
     order = rows[0]
+    order_id_value = str(order.get("id") or order.get("order_display_id") or "")
     return {
         **event,
         "order": order,
-        "orderId": str(order.get("id") or order.get("order_number", "")),
+        "orderId": order_id_value,
+        "orderUuid": order_id_value,
+        "orderDisplayId": order_id_value[:8],
     }

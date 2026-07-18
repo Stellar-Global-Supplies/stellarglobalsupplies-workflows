@@ -18,7 +18,7 @@ def handler(event, context):
     if event.get("httpMethod") == "OPTIONS":
         return ok({})
 
-    path    = event.get("path", "")
+    path    = event.get("path") or event.get("rawPath", "")
     qs      = event.get("queryStringParameters") or {}
     db      = get_client()
     limit   = int(qs.get("limit", 50))
