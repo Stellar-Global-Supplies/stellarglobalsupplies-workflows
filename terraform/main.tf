@@ -381,8 +381,8 @@ locals {
     ASSETS_CLOUDFRONT_URL     = "https://${aws_cloudfront_distribution.assets.domain_name}"
     CONTEXT_BUCKET            = var.context_bucket
     BEDROCK_TEXT_MODEL        = "amazon.nova-pro-v1:0"
-    BEDROCK_IMAGE_MODEL       = "amazon.nova-canvas-v1:0"
-    BEDROCK_IMAGE_MODEL_FALLBACK = "amazon.titan-image-generator-v2:0"
+    # BEDROCK_IMAGE_MODEL       = "amazon.nova-canvas-v1:0"
+    # BEDROCK_IMAGE_MODEL_FALLBACK = "amazon.titan-image-generator-v2:0"
     SENDER_EMAIL              = var.sender_email
     GMAIL_CLIENT_ID_PARAM     = "/${var.project_name}/gmail/client_id"
     GMAIL_CLIENT_SECRET_PARAM = "/${var.project_name}/gmail/client_secret"

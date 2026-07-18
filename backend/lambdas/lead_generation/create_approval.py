@@ -48,17 +48,34 @@ def handler(event, context):
         payload      = data
         preview_html = f"<pre>{str(data)[:2000]}</pre>"
 
+    # Keep the workflow run id inside the payload too so approval_handler can
+    # still resolve and update workflow_runs even if the approval_queue schema
+    # is missing the optional workflow_run_id column in an older deployment.
+    if workflow_run_id and isinstance(payload, dict):
+        payload = {**payload, "workflowRunId": workflow_run_id}
+
     db  = get_client()
     row = {
         "workflow_type": workflow_type,
         "reference_id":  str(reference_id),
         "task_token":    task_token,
-        "workflow_run_id": workflow_run_id,
         "payload":       payload,
         "preview_html":  preview_html,
         "status":        "pending",
     }
-    saved = db.insert("approval_queue", row)
+
+    if workflow_run_id:
+        row["workflow_run_id"] = workflow_run_id
+
+    # Older Supabase deployments may not have the workflow_run_id column yet.
+    # Insert the approval anyway, then fall back to a schema-compatible row.
+    try:
+        saved = db.insert("approval_queue", row)
+    except Exception as exc:
+        if "workflow_run_id" not in str(exc):
+            raise
+        fallback_row = {k: v for k, v in row.items() if k != "workflow_run_id"}
+        saved = db.insert("approval_queue", fallback_row)
 
     # Do NOT return - lambda exits here, Step Function waits for SendTaskSuccess/Failure
     return {"approvalId": saved["id"], "status": "waiting"}
