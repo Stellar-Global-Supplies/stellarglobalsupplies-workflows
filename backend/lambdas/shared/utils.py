@@ -46,12 +46,12 @@ def now_iso() -> str:
 
 
 def upload_image_to_s3(image_bytes: bytes, key: str, content_type: str = "image/png") -> str:
-    """Upload image to S3 and return public URL."""
+    """Upload image to S3 and return CloudFront URL."""
     s3 = boto3.client("s3")
     bucket = os.environ["ASSETS_BUCKET"]
-    s3.put_object(Bucket=bucket, Key=key, Body=image_bytes, ContentType=content_type, ACL="public-read")
-    region = os.environ.get("AWS_REGION", "us-east-1")
-    return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+    s3.put_object(Bucket=bucket, Key=key, Body=image_bytes, ContentType=content_type)
+    cloudfront_url = os.environ.get("ASSETS_CLOUDFRONT_URL", "").rstrip("/")
+    return f"{cloudfront_url}/{key}"
 
 
 def get_ssm(name: str) -> str:

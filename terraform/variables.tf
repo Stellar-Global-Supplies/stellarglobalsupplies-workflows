@@ -28,6 +28,12 @@ variable "workflow_domain" {
   default     = "workflow.stellarglobalsupplies.com"
 }
 
+variable "assets_domain" {
+  description = "Full subdomain for assets CDN"
+  type        = string
+  default     = "assets.stellarglobalsupplies.com"
+}
+
 variable "acm_certificate_arn" {
   description = "ACM certificate ARN (must be in us-east-1 for CloudFront)"
   type        = string

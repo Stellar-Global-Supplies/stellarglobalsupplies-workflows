@@ -18,6 +18,11 @@ output "assets_bucket" {
   value       = aws_s3_bucket.assets.bucket
 }
 
+output "assets_cloudfront_domain" {
+  description = "CloudFront distribution domain for assets"
+  value       = aws_cloudfront_distribution.assets.domain_name
+}
+
 output "api_endpoint" {
   description = "API Gateway endpoint URL"
   value       = aws_apigatewayv2_api.main.api_endpoint
