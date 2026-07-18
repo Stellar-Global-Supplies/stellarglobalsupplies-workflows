@@ -380,7 +380,7 @@ locals {
     ASSETS_BUCKET             = aws_s3_bucket.assets.bucket
     ASSETS_CLOUDFRONT_URL     = "https://${aws_cloudfront_distribution.assets.domain_name}"
     CONTEXT_BUCKET            = var.context_bucket
-    BEDROCK_TEXT_MODEL        = "amazon.nova-lite-v1:0"
+    BEDROCK_TEXT_MODEL        = "amazon.nova-pro-v1:0"
     BEDROCK_IMAGE_MODEL       = "amazon.nova-canvas-v1:0"
     BEDROCK_IMAGE_MODEL_FALLBACK = "amazon.titan-image-generator-v2:0"
     SENDER_EMAIL              = var.sender_email

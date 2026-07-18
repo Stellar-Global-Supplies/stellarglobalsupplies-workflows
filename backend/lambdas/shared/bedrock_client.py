@@ -19,7 +19,7 @@ def get_bedrock_runtime():
 def generate_text(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
     """Generate text using Amazon Nova via Bedrock."""
     client = get_bedrock_runtime()
-    model_id = os.environ.get("BEDROCK_TEXT_MODEL", "amazon.nova-lite-v1:0")
+    model_id = os.environ.get("BEDROCK_TEXT_MODEL", "amazon.nova-pro-v1:0")
 
     messages = [{"role": "user", "content": [{"text": prompt}]}]
 

@@ -107,9 +107,9 @@ export default function ApprovalQueue() {
       await approveItem(id, note)
       toast.success('Approved! Workflow is continuing…')
       setPreview(null)
-      qc.invalidateQueries({ queryKey: ['approvals'] })
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
-      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+      await qc.refetchQueries({ queryKey: ['approvals'] })
+      await qc.refetchQueries({ queryKey: ['dashboard'] })
+      await qc.refetchQueries({ queryKey: ['pending-approvals-count'] })
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -123,9 +123,9 @@ export default function ApprovalQueue() {
       await rejectItem(id, note)
       toast.success('Rejected.')
       setPreview(null)
-      qc.invalidateQueries({ queryKey: ['approvals'] })
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
-      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+      await qc.refetchQueries({ queryKey: ['approvals'] })
+      await qc.refetchQueries({ queryKey: ['dashboard'] })
+      await qc.refetchQueries({ queryKey: ['pending-approvals-count'] })
     } catch (e) {
       toast.error(e.message)
     } finally {

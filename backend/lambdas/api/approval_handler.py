@@ -9,9 +9,21 @@ sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import json
+import re
 import boto3
 from shared.supabase_client import get_client
 from shared.utils import ok, err, now_iso, send_task_success, send_task_failure
+
+
+def _approval_id_from_event(event):
+    path_params = event.get("pathParameters") or {}
+    approval_id = path_params.get("id")
+    if approval_id:
+        return approval_id
+
+    raw_path = event.get("rawPath") or event.get("path") or ""
+    match = re.search(r"/approvals/([^/]+)/(approve|reject)$", raw_path)
+    return match.group(1) if match else None
 
 
 def handler(event, context):
@@ -20,8 +32,7 @@ def handler(event, context):
 
     method      = event.get("httpMethod", "GET")
     path        = event.get("path") or event.get("rawPath", "")
-    path_params = event.get("pathParameters") or {}
-    approval_id = path_params.get("id")
+    approval_id  = _approval_id_from_event(event)
 
     db = get_client()
 
@@ -95,7 +106,9 @@ def handler(event, context):
         try:
             send_task_failure(item["task_token"], "Rejected", reviewer_note or "Rejected by reviewer")
         except Exception:
-            pass  # Best effort
+            # Best effort: even if the Step Functions callback fails, the review
+            # decision should still be persisted in the approval queue.
+            pass
 
         db.update("approval_queue", {
             "status":      "rejected",
