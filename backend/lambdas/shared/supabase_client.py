@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 # Hard timeout for every Supabase HTTP call.
 # Without this, urlopen blocks indefinitely when Supabase is slow/unreachable,
 # causing Lambda to hang until the function-level timeout kills the execution.
-_HTTP_TIMEOUT = 30  # seconds
+_HTTP_TIMEOUT = 20  # seconds
 
 
 class SupabaseClient:

@@ -22,7 +22,11 @@ def handler(event, context):
         "address":         lead.get("address"),
         "contact_name":    lead.get("contact_name"),
         "description":     lead.get("description"),
-        "status":          "approved",
+        # Leads are only inserted AFTER human approval, so 'pending' here means
+        # "approved and waiting for email outreach" — the correct first state in
+        # the emailed → followed_up → converted/rejected lifecycle.
+        # ('approved' is not in the leads_status_check constraint.)
+        "status":          "pending",
         "source":          lead.get("source", "ai_generated"),
         "workflow_run_id": event.get("workflowRunId") or None,
     }

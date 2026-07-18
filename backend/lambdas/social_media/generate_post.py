@@ -163,9 +163,15 @@ Return JSON:
         "social_workflow_id": workflow_run_id,
     }
     row = {k: v for k, v in row.items() if v is not None}
+    # optional_columns: stripped one-by-one if the DB column does not exist yet.
+    # required_columns: MUST NOT overlap with optional_columns — any column in both
+    #   lists causes an infinite loop (removed then immediately re-added each iteration).
+    # "platform" (TEXT label) is optional; "platforms" (JSONB map) is the required one.
+    # "caption" and "week_start" are also optional (added by migration 005).
     optional_columns = ["content_s3_key", "content_url", "order_uuid", "workflow_run_id", "social_workflow_id",
-                        "platform", "image_url", "image_s3_key", "repo_name", "order_id"]
-    required_columns = ["platform", "platforms", "type", "content", "status", "caption", "week_start"]
+                        "platform", "caption", "week_start", "image_url", "image_s3_key", "repo_name", "order_id"]
+    required_columns = ["platforms", "type", "content", "status"]
+    print(f"[generate_post] Insert row to Supabase")
     insert_row = row.copy()
     while True:
         try:
