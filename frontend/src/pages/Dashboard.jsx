@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getDashboard, listApprovals } from '../services/api'
-import { StatCard, Skeleton, StatusBadge, PageHeader } from '../components/ui'
-import { LayoutDashboard, Users, Share2, FileText, CheckSquare, ArrowRight, Zap } from 'lucide-react'
+import { StatCard, Skeleton, StatusBadge, PageHeader, EmptyState } from '../components/ui'
+import { LayoutDashboard, Users, Share2, FileText, CheckSquare, ArrowRight, Zap, History } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 const WORKFLOW_CARDS = [
