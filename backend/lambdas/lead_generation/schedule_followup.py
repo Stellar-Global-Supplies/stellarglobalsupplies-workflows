@@ -16,8 +16,10 @@ SYSTEM = "You are a B2B sales copywriter. Write a brief, friendly follow-up emai
 
 
 def handler(event, context):
-    lead      = event["lead"]
-    lead_id   = event["leadId"]
+    lead      = event.get("lead") or event.get("payload", {}).get("lead") or {}
+    lead_id   = event.get("leadId") or event.get("payload", {}).get("lead_id")
+    if not lead or not lead_id:
+        raise ValueError(f"Missing lead or leadId in event: {list(event.keys())}")
     sent_at   = event.get("emailSentAt", "recently")
 
     # Draft follow-up

@@ -19,7 +19,7 @@ export default function Dashboard() {
     refetchInterval: 60_000,
   })
   const { data: approvalsData } = useQuery({
-    queryKey: ['approvals-pending'],
+    queryKey: ['pending-approvals-count'],
     queryFn: () => listApprovals('pending'),
     refetchInterval: 30_000,
   })

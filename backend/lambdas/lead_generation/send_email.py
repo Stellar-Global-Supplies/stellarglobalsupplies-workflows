@@ -66,10 +66,12 @@ def send_gmail(access_token: str, raw: str) -> dict:
 
 
 def handler(event, context):
-    lead       = event["lead"]
-    draft      = event["emailDraft"]
-    draft_id   = event["emailDraftId"]
-    lead_id    = event["leadId"]
+    lead       = event.get("lead") or event.get("payload", {}).get("lead") or {}
+    draft      = event.get("emailDraft") or event.get("payload", {}).get("emailDraft") or {}
+    draft_id   = event.get("emailDraftId") or event.get("payload", {}).get("emailDraftId")
+    lead_id    = event.get("leadId") or event.get("payload", {}).get("lead_id")
+    if not lead.get("email") or not draft.get("subject") or not draft_id or not lead_id:
+        raise ValueError(f"Missing required fields in send_email event: {list(event.keys())}")
     sender     = os.environ.get("SENDER_EMAIL", "sales@stellarglobalsupplies.com")
 
     access_token = get_gmail_access_token()

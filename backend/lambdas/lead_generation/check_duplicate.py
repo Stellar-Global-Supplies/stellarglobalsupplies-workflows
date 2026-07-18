@@ -6,6 +6,7 @@ import sys, os
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import urllib.parse
 from shared.supabase_client import get_client
 
 
@@ -16,13 +17,13 @@ def handler(event, context):
 
     db = get_client()
 
-    # Check by email (unique index in DB)
-    by_email = db.select("leads", params=f"email=eq.{email}&select=id,email,status&limit=1")
+    # URL-encode email — it may contain '+' or other special chars that break query strings
+    enc_email = urllib.parse.quote(email, safe="")
+    by_email = db.select("leads", params=f"email=eq.{enc_email}&select=id,email,status&limit=1")
 
     # Check by company name (fuzzy match via ilike)
-    import urllib.parse
-    enc = urllib.parse.quote(f"%{company_name}%")
-    by_name = db.select("leads", params=f"company_name=ilike.{enc}&select=id,company_name,status&limit=1")
+    enc_name = urllib.parse.quote(f"%{company_name}%", safe="")
+    by_name = db.select("leads", params=f"company_name=ilike.{enc_name}&select=id,company_name,status&limit=1")
 
     is_duplicate = bool(by_email or by_name)
     existing_id  = (by_email or by_name)[0]["id"] if is_duplicate else None

@@ -4,6 +4,7 @@ Generates social media content + image for a product or tech post.
 Image is non-blocking — post saves without image if all options fail.
 """
 import sys, os, uuid, urllib.parse
+from datetime import datetime, timezone, timedelta
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -115,11 +116,28 @@ Return JSON:
     # ── Save to Supabase ──────────────────────────────────────
     db  = get_client()
     workflow_run_id = event.get("workflowRunId")
+
+    # week_start: Monday of the current UTC week (required NOT NULL column)
+    today = datetime.now(timezone.utc).date()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+
+    # caption must never be None/empty — fall back through instagram → facebook → title
+    caption = (
+        content_data.get("instagram")
+        or content_data.get("facebook")
+        or content_data.get("title")
+        or ""
+    )
+
+    # order_uuid must be a real UUID string or omitted — never the string "None"
+    safe_order_uuid = order_uuid if (order_uuid and order_uuid != "None") else None
+
     row = {
         "type":              post_type,
         "title":             content_data.get("title", ""),
         "content":           content_data.get("facebook", "")[:500],
-        "caption":           content_data.get("instagram", ""),
+        "caption":           caption,
+        "week_start":        week_start,
         "content_s3_key":    content_key,
         "content_url":       content_url,
         "image_url":         image_url,
@@ -128,15 +146,16 @@ Return JSON:
         "platforms":         {"facebook": True, "instagram": True, "linkedin": True},
         "status":            "draft",
         "order_id":          order_id if post_type == "product" else None,
-        "order_uuid":        order_uuid or None if post_type == "product" else None,
+        "order_uuid":        safe_order_uuid if post_type == "product" else None,
         "repo_name":         repo_name if post_type == "tech" else None,
         "prompt":            prompt,
         "workflow_run_id":   workflow_run_id,
         "social_workflow_id": workflow_run_id,
     }
     row = {k: v for k, v in row.items() if v is not None}
-    optional_columns = ["content_s3_key", "content_url", "order_uuid", "workflow_run_id", "social_workflow_id"]
-    required_columns = ["platform", "platforms", "type", "content", "status"]
+    optional_columns = ["content_s3_key", "content_url", "order_uuid", "workflow_run_id", "social_workflow_id",
+                        "platform", "image_url", "image_s3_key", "repo_name", "order_id"]
+    required_columns = ["platform", "platforms", "type", "content", "status", "caption", "week_start"]
     insert_row = row.copy()
     while True:
         try:

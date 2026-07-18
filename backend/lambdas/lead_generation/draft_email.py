@@ -19,8 +19,10 @@ Never sound like a mass mailer. Reference the specific company and why we can he
 
 
 def handler(event, context):
-    lead     = event["lead"]
-    lead_id  = event["leadId"]
+    lead     = event.get("lead") or event.get("payload", {}).get("lead") or {}
+    lead_id  = event.get("leadId") or event.get("payload", {}).get("lead_id")
+    if not lead or not lead_id:
+        raise ValueError(f"Missing lead or leadId in event: {list(event.keys())}")
 
     prompt = f"""
 Draft a B2B outreach email from {SENDER_NAME} to {lead.get('contact_name', 'the team')} at {lead['company_name']}.

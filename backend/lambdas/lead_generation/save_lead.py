@@ -24,7 +24,7 @@ def handler(event, context):
         "description":     lead.get("description"),
         "status":          "approved",
         "source":          lead.get("source", "ai_generated"),
-        "workflow_run_id": event.get("workflowRunId"),
+        "workflow_run_id": event.get("workflowRunId") or None,
     }
 
     saved = db.insert("leads", row)

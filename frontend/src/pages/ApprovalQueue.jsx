@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listApprovals, approveItem, rejectItem, getGeneratedContent } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, Modal, Spinner } from '../components/ui'
-import { CheckSquare, Check, X, Eye, Mail, Share2, FileText, Code2, RefreshCw } from 'lucide-react'
+import { CheckSquare, Check, X, Eye, Mail, Share2, FileText, Code2, RefreshCw, Users } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
 const WF_META = {
+  lead_approval: { label: 'Lead Approval',     icon: Users,     color: 'text-emerald-600',bg: 'bg-emerald-50' },
   lead_email:    { label: 'Email Outreach',    icon: Mail,      color: 'text-blue-600',   bg: 'bg-blue-50' },
   lead_followup: { label: 'Follow-up Email',   icon: Mail,      color: 'text-indigo-600', bg: 'bg-indigo-50' },
   social_product:{ label: 'Product Post',      icon: Share2,    color: 'text-navy',       bg: 'bg-navy/5' },

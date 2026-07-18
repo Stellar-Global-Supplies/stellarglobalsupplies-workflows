@@ -55,11 +55,20 @@ def generate_text(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
 
 def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict:
     sys_p = (system or "") + "\n\nRespond ONLY with valid JSON. No markdown fences, no commentary."
-    text  = generate_text(prompt, system=sys_p, max_tokens=max_tokens).strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        text  = parts[1][4:] if parts[1].startswith("json") else parts[1]
-    return json.loads(text.strip())
+    last_exc = None
+    for attempt in range(2):
+        text = generate_text(prompt, system=sys_p, max_tokens=max_tokens).strip()
+        # Strip markdown fences if present
+        if text.startswith("```"):
+            parts = text.split("```")
+            text  = parts[1][4:] if parts[1].startswith("json") else parts[1]
+        text = text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            last_exc = exc
+            log.warning(f"[bedrock] generate_json attempt {attempt+1} returned invalid JSON: {text[:200]}")
+    raise ValueError(f"Nova returned invalid JSON after 2 attempts: {last_exc}") from last_exc
 
 
 # ─── IMAGE option 1: Pollinations.AI ─────────────────────────────────────────

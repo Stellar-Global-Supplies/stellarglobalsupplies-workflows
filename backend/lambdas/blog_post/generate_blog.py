@@ -85,7 +85,7 @@ Return valid JSON:
         "image_s3_key":    img_key,
         "tags":            blog_data.get("tags", []),
         "status":          "draft",
-        "workflow_run_id": event.get("workflowRunId"),
+        "workflow_run_id": event.get("workflowRunId") or None,
     }
     row = {k: v for k, v in row.items() if v is not None}
     optional_columns = ["content_s3_key", "content_url", "workflow_run_id"]

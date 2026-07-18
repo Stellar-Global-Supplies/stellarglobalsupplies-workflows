@@ -36,8 +36,12 @@ def handler(event, context):
     qs      = event.get("queryStringParameters") or {}
     db      = get_client()
     method  = _http_method(event)
-    limit   = int(qs.get("limit", 50))
-    offset  = int(qs.get("offset", 0))
+    try:
+        limit  = int(qs.get("limit", 50))
+        offset = int(qs.get("offset", 0))
+    except (TypeError, ValueError):
+        limit  = 50
+        offset = 0
     status  = qs.get("status", "")
 
     def with_filters(base_params: str, table_status: str = "") -> str:

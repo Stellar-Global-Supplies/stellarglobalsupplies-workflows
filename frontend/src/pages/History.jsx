@@ -110,7 +110,7 @@ export default function HistoryPage() {
         <div className="card overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-100">
             <span className="text-sm font-medium text-navy">
-              {tab === 'product' ? 'Product' : 'Tech'} Posts ({tab === 'product' ? product : tech}.length)
+              {tab === 'product' ? 'Product' : 'Tech'} Posts ({(tab === 'product' ? product : tech).length})
             </span>
           </div>
           {isLoading ? <div className="p-4 space-y-3">{Array(4).fill(0).map((_,i)=><Skeleton key={i} className="h-20"/>)}</div>
