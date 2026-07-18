@@ -62,10 +62,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')"
-          payload="$(printf '%s' "$token" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r '{aud, sub, repository, ref, workflow, job_workflow_ref}')"
-          echo "$payload"
+          token_json="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+          token="$(echo "$token_json" | jq -r '.value')"
+          python3 - <<'PY' "$token"
+          import base64, json, sys
+          token = sys.argv[1]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          decoded = json.loads(base64.urlsafe_b64decode(payload).decode())
+          print(json.dumps({
+              "aud": decoded.get("aud"),
+              "sub": decoded.get("sub"),
+              "repository": decoded.get("repository"),
+              "ref": decoded.get("ref"),
+              "workflow": decoded.get("workflow"),
+              "job_workflow_ref": decoded.get("job_workflow_ref"),
+          }, indent=2))
+          PY
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -149,10 +163,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')"
-          payload="$(printf '%s' "$token" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r '{aud, sub, repository, ref, workflow, job_workflow_ref}')"
-          echo "$payload"
+          token_json="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+          token="$(echo "$token_json" | jq -r '.value')"
+          python3 - <<'PY' "$token"
+          import base64, json, sys
+          token = sys.argv[1]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          decoded = json.loads(base64.urlsafe_b64decode(payload).decode())
+          print(json.dumps({
+              "aud": decoded.get("aud"),
+              "sub": decoded.get("sub"),
+              "repository": decoded.get("repository"),
+              "ref": decoded.get("ref"),
+              "workflow": decoded.get("workflow"),
+              "job_workflow_ref": decoded.get("job_workflow_ref"),
+          }, indent=2))
+          PY
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -250,10 +278,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')"
-          payload="$(printf '%s' "$token" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r '{aud, sub, repository, ref, workflow, job_workflow_ref}')"
-          echo "$payload"
+          token_json="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+          token="$(echo "$token_json" | jq -r '.value')"
+          python3 - <<'PY' "$token"
+          import base64, json, sys
+          token = sys.argv[1]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          decoded = json.loads(base64.urlsafe_b64decode(payload).decode())
+          print(json.dumps({
+              "aud": decoded.get("aud"),
+              "sub": decoded.get("sub"),
+              "repository": decoded.get("repository"),
+              "ref": decoded.get("ref"),
+              "workflow": decoded.get("workflow"),
+              "job_workflow_ref": decoded.get("job_workflow_ref"),
+          }, indent=2))
+          PY
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
