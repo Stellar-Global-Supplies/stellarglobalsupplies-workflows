@@ -36,7 +36,7 @@ export default function TechPost() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <PageHeader icon={Code2} title="Tech Showcase Posts"
-        sub="Reads reponame/ai_context.md from S3 → AI generates post → approval → post to all platforms" />
+        sub="Reads {repo_name}/ai_context.md from S3 → AI generates post + image → approval → post to all platforms" />
 
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
         {['launch','posts'].map(t => (
@@ -53,7 +53,7 @@ export default function TechPost() {
           <h2 className="font-semibold text-navy mb-4">New Tech Showcase Post</h2>
           <div className="space-y-4">
             <FormField label="Repository Name"
-              hint="The workflow reads s3://your-bucket/{repo_name}/ai_context.md">
+              hint="The workflow reads {repo_name}/ai_context.md from the private context bucket">
               <input value={form.repo_name} onChange={e => setForm(f => ({...f, repo_name: e.target.value}))}
                 className="input font-mono" placeholder="e.g. workflows-platform" />
             </FormField>
@@ -66,9 +66,9 @@ export default function TechPost() {
           </div>
 
           <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
-            <strong>S3 context file format:</strong> Place a markdown file at
+            <strong>Context file format:</strong> Place a markdown file at
             <code className="bg-slate-200 px-1 rounded mx-1">{'{repo_name}/ai_context.md'}</code>
-            in your assets bucket. The AI will use it to write an accurate tech showcase post.
+            in the private context bucket. The AI will use it to write an accurate tech showcase post and generate the featured image.
           </div>
 
           <button onClick={launch} disabled={running} className="btn-primary w-full justify-center py-2.5 mt-5">
