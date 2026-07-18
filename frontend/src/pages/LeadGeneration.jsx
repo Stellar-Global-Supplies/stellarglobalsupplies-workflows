@@ -13,6 +13,7 @@ export default function LeadGeneration() {
   const qc = useQueryClient()
   const [form, setForm] = useState({ target_industry: 'Manufacturing', target_country: 'India', additional_context: '' })
   const [running, setRunning] = useState(false)
+  const [emailingId, setEmailingId] = useState(null)
   const [tab, setTab] = useState('launch')
 
   const { data: leadsData, isLoading } = useQuery({
@@ -34,6 +35,19 @@ export default function LeadGeneration() {
       toast.error(e.message)
     } finally {
       setRunning(false)
+    }
+  }
+
+  async function draftFromLead(lead) {
+    setEmailingId(lead.id)
+    try {
+      const res = await startWorkflow('lead-email-existing', { leadId: lead.id })
+      toast.success(`Email draft workflow started — run ID: ${res.workflowRunId?.slice(0,8)}`)
+      qc.invalidateQueries(['dashboard'])
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setEmailingId(null)
     }
   }
 
@@ -126,7 +140,13 @@ export default function LeadGeneration() {
                       <span>{formatDistanceToNow(new Date(lead.created_at), { addSuffix: true })}</span>
                     </div>
                   </div>
-                  <StatusBadge status={lead.status} />
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={lead.status} />
+                    <button onClick={() => draftFromLead(lead)} disabled={emailingId === lead.id}
+                      className="btn-secondary text-xs py-1.5">
+                      {emailingId === lead.id ? 'Starting…' : 'Draft Email'}
+                    </button>
+                  </div>
                   {lead.website && (
                     <a href={lead.website} target="_blank" rel="noopener noreferrer"
                       className="text-slate-400 hover:text-navy transition-colors">

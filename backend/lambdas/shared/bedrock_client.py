@@ -17,9 +17,9 @@ def get_bedrock_runtime():
 
 
 def generate_text(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
-    """Generate text using Amazon Nova Pro via Bedrock."""
+    """Generate text using Amazon Nova via Bedrock."""
     client = get_bedrock_runtime()
-    model_id = os.environ.get("BEDROCK_TEXT_MODEL", "amazon.nova-pro-v1:0")
+    model_id = os.environ.get("BEDROCK_TEXT_MODEL", "amazon.nova-lite-v1:0")
 
     messages = [{"role": "user", "content": [{"text": prompt}]}]
 
@@ -74,12 +74,37 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
         },
     }
 
-    response = client.invoke_model(
-        modelId=model_id,
-        body=json.dumps(body),
-        contentType="application/json",
-        accept="application/json",
-    )
+    try:
+        response = client.invoke_model(
+            modelId=model_id,
+            body=json.dumps(body),
+            contentType="application/json",
+            accept="application/json",
+        )
+    except Exception as exc:
+        message = str(exc)
+        # If Nova Canvas is unavailable in the region/account, fall back to Titan Image Generator.
+        if "Legacy" in message or "Access denied" in message or "ResourceNotFoundException" in message:
+            fallback_model = os.environ.get("BEDROCK_IMAGE_MODEL_FALLBACK", "amazon.titan-image-generator-v2:0")
+            fallback_body = {
+                "taskType": "TEXT_IMAGE",
+                "textToImageParams": {"text": prompt},
+                "imageGenerationConfig": {
+                    "numberOfImages": 1,
+                    "width": width,
+                    "height": height,
+                    "quality": "standard",
+                    "cfgScale": 8.0,
+                },
+            }
+            response = client.invoke_model(
+                modelId=fallback_model,
+                body=json.dumps(fallback_body),
+                contentType="application/json",
+                accept="application/json",
+            )
+        else:
+            raise
     result = json.loads(response["body"].read())
-    image_b64 = result["images"][0]
+    image_b64 = result.get("images", [None])[0] or result.get("artifacts", [{}])[0].get("base64")
     return base64.b64decode(image_b64)

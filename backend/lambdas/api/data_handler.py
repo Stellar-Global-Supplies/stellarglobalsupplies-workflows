@@ -10,6 +10,8 @@ import sys, os
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import boto3
+import json
 from shared.supabase_client import get_client
 from shared.utils import ok, err
 
@@ -61,6 +63,7 @@ def handler(event, context):
         return ok({"runs": rows, "count": len(rows)})
 
     elif "/data/dashboard" in path:
+        _sync_workflow_runs(db)
         leads         = db.select("leads",        params="select=status")
         social_posts  = db.select("social_posts", params="select=status,type")
         blogs         = db.select("blog_posts",   params="select=status")
@@ -94,3 +97,35 @@ def _count_by(rows: list, field: str) -> dict:
         v = r.get(field, "unknown")
         counts[v] = counts.get(v, 0) + 1
     return counts
+
+
+def _sync_workflow_runs(db):
+    sfn = boto3.client("stepfunctions")
+    runs = db.select("workflow_runs", params="status=eq.running&select=id,execution_arn,status,workflow_type,started_at&limit=20")
+    for run in runs:
+        arn = run.get("execution_arn")
+        if not arn:
+            continue
+        try:
+            resp = sfn.describe_execution(executionArn=arn)
+        except Exception:
+            continue
+
+        status = resp.get("status", "")
+        if status == "RUNNING":
+            continue
+
+        update = {
+            "status": "succeeded" if status == "SUCCEEDED" else "failed" if status == "FAILED" else "stopped" if status == "ABORTED" else "timed_out",
+            "completed_at": resp.get("stopDate") or run.get("completed_at"),
+        }
+
+        if status == "SUCCEEDED" and resp.get("output"):
+            try:
+                update["output"] = json.loads(resp["output"])
+            except Exception:
+                update["output"] = {"raw": resp["output"]}
+        elif status in ("FAILED", "ABORTED", "TIMED_OUT"):
+            update["error_msg"] = resp.get("cause") or resp.get("error") or status
+
+        db.update("workflow_runs", update, params=f"id=eq.{run['id']}")

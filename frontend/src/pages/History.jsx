@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getLeads, getSocialPosts, getBlogPosts, getWorkflowRuns } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, Skeleton } from '../components/ui'
-import { History, Users, Share2, FileText, Zap, ExternalLink, GitPullRequest, CheckCircle, XCircle } from 'lucide-react'
+import { History, Users, Share2, FileText, Zap, ExternalLink, GitPullRequest, CheckCircle, XCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 
 const TABS = [
@@ -15,6 +15,7 @@ const TABS = [
 
 export default function HistoryPage() {
   const [tab, setTab] = useState('leads')
+  const [openRunId, setOpenRunId] = useState(null)
 
   const { data: leadsData,   isLoading: ll } = useQuery({ queryKey: ['history-leads'],   queryFn: () => getLeads(),                                   enabled: tab === 'leads' })
   const { data: productData, isLoading: lp } = useQuery({ queryKey: ['history-product'], queryFn: () => getSocialPosts('type=product&limit=100'),       enabled: tab === 'product' })
@@ -197,7 +198,32 @@ export default function HistoryPage() {
                       <td className="px-4 py-3 text-slate-400 text-xs">
                         {r.completed_at ? `${Math.round((new Date(r.completed_at)-new Date(r.started_at))/1000)}s` : '—'}
                       </td>
-                      <td className="px-4 py-3 text-slate-400 text-xs font-mono truncate max-w-xs">{r.execution_arn?.split(':').pop()}</td>
+                      <td className="px-4 py-3 text-slate-400 text-xs font-mono truncate max-w-xs">
+                        <button onClick={() => setOpenRunId(openRunId === r.id ? null : r.id)} className="flex items-center gap-1 hover:text-navy">
+                          {openRunId === r.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          {r.execution_arn?.split(':').pop()}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {runs.map(r => openRunId === r.id && (
+                    <tr key={`${r.id}-details`} className="bg-slate-50/60">
+                      <td colSpan={5} className="px-4 py-4">
+                        <div className="grid gap-4 md:grid-cols-3 text-xs">
+                          <div>
+                            <div className="font-semibold text-slate-600 mb-1">Input</div>
+                            <pre className="bg-white border border-slate-200 rounded-lg p-3 overflow-auto max-h-56 whitespace-pre-wrap">{JSON.stringify(r.input || {}, null, 2)}</pre>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-slate-600 mb-1">Output</div>
+                            <pre className="bg-white border border-slate-200 rounded-lg p-3 overflow-auto max-h-56 whitespace-pre-wrap">{JSON.stringify(r.output || {}, null, 2)}</pre>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-slate-600 mb-1">Error</div>
+                            <pre className="bg-white border border-slate-200 rounded-lg p-3 overflow-auto max-h-56 whitespace-pre-wrap">{r.error_msg || 'No error recorded'}</pre>
+                          </div>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

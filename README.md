@@ -196,7 +196,7 @@ Non-sensitive config is in Lambda environment variables (set via Terraform).
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Service role key |
 | `ASSETS_BUCKET` | Private S3 bucket for AI-generated images (served through CloudFront) |
-| `BEDROCK_TEXT_MODEL` | `amazon.nova-pro-v1:0` |
+| `BEDROCK_TEXT_MODEL` | `amazon.nova-lite-v1:0` |
 | `BEDROCK_IMAGE_MODEL` | `amazon.nova-canvas-v1:0` |
 | `SENDER_EMAIL` | Gmail sender address |
 | `HUNTER_API_KEY_PARAM` | SSM path to Hunter.io key |

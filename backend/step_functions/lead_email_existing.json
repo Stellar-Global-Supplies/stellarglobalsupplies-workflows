@@ -1,0 +1,76 @@
+{
+  "Comment": "Lead Email Workflow - Load an existing lead, draft email, await approval, send, follow-up",
+  "StartAt": "LoadLead",
+  "States": {
+    "LoadLead": {
+      "Type": "Task",
+      "Resource": "${LoadLeadForEmailArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 2, "MaxAttempts": 2}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "DraftEmail"
+    },
+    "DraftEmail": {
+      "Type": "Task",
+      "Resource": "${DraftEmailArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "WaitForEmailApproval"
+    },
+    "WaitForEmailApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${CreateApprovalArn}",
+        "Payload": {
+          "taskToken.$": "$$.Task.Token",
+          "workflowType": "lead_email",
+          "data.$": "$"
+        }
+      },
+      "ResultPath": "$.approvalResult",
+      "TimeoutSeconds": 604800,
+      "HeartbeatSeconds": 86400,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"],
+          "Next": "ApprovalExpired",
+          "ResultPath": "$.error"
+        },
+        {
+          "ErrorEquals": ["Rejected"],
+          "Next": "EmailRejected",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "SendEmail"
+    },
+    "SendEmail": {
+      "Type": "Task",
+      "Resource": "${SendEmailArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "ScheduleFollowup"
+    },
+    "ScheduleFollowup": {
+      "Type": "Task",
+      "Resource": "${ScheduleFollowupArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 2}],
+      "End": true
+    },
+    "EmailRejected": {
+      "Type": "Succeed"
+    },
+    "ApprovalExpired": {
+      "Type": "Succeed"
+    },
+    "WorkflowFailed": {
+      "Type": "Fail",
+      "Error": "WorkflowError",
+      "Cause": "An error occurred in the existing-lead email workflow"
+    }
+  }
+}

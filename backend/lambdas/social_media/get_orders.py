@@ -17,11 +17,17 @@ def handler(event, context):
     order_id = event.get("order_id")
 
     if order_id:
-        rows = db.select("orders", params=f"id=eq.{order_id}&limit=1")
+        order_id_str = str(order_id).strip()
+        rows = []
+
+        # Full UUIDs can be queried directly.
+        if len(order_id_str) >= 32:
+            rows = db.select("orders", params=f"id=eq.{order_id_str}&limit=1")
+
         if not rows:
-            # Support short UUID prefixes from the UI by scanning recent rows locally.
+            # Support short display IDs / UUID prefixes from the UI by scanning recent rows locally.
             recent = db.select("orders", params="select=*&order=created_at.desc&limit=100")
-            rows = [r for r in recent if str(r.get("id", "")).startswith(str(order_id))]
+            rows = [r for r in recent if str(r.get("id", "")).startswith(order_id_str)]
     else:
         limit        = event.get("limit", 1)
         product_type = event.get("product_type", "")

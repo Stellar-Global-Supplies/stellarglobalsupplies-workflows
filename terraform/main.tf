@@ -380,8 +380,9 @@ locals {
     ASSETS_BUCKET             = aws_s3_bucket.assets.bucket
     ASSETS_CLOUDFRONT_URL     = "https://${aws_cloudfront_distribution.assets.domain_name}"
     CONTEXT_BUCKET            = var.context_bucket
-    BEDROCK_TEXT_MODEL        = "amazon.nova-pro-v1:0"
+    BEDROCK_TEXT_MODEL        = "amazon.nova-lite-v1:0"
     BEDROCK_IMAGE_MODEL       = "amazon.nova-canvas-v1:0"
+    BEDROCK_IMAGE_MODEL_FALLBACK = "amazon.titan-image-generator-v2:0"
     SENDER_EMAIL              = var.sender_email
     GMAIL_CLIENT_ID_PARAM     = "/${var.project_name}/gmail/client_id"
     GMAIL_CLIENT_SECRET_PARAM = "/${var.project_name}/gmail/client_secret"
@@ -401,6 +402,7 @@ locals {
 
   lambdas = {
     generate-leads    = { handler = "lead_generation.generate_leads.handler", source = "../backend/lambdas" }
+    load-lead-for-email = { handler = "lead_generation.load_lead_for_email.handler", source = "../backend/lambdas" }
     check-duplicate   = { handler = "lead_generation.check_duplicate.handler", source = "../backend/lambdas" }
     save-lead         = { handler = "lead_generation.save_lead.handler", source = "../backend/lambdas" }
     draft-email       = { handler = "lead_generation.draft_email.handler", source = "../backend/lambdas" }
@@ -459,6 +461,7 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
 locals {
   sf_substitutions = {
     GenerateLeadsArn    = aws_lambda_function.functions["generate-leads"].arn
+    LoadLeadForEmailArn = aws_lambda_function.functions["load-lead-for-email"].arn
     CheckDuplicateArn   = aws_lambda_function.functions["check-duplicate"].arn
     SaveLeadArn         = aws_lambda_function.functions["save-lead"].arn
     DraftEmailArn       = aws_lambda_function.functions["draft-email"].arn
@@ -478,6 +481,12 @@ resource "aws_sfn_state_machine" "lead_generation" {
   name       = "${local.prefix}-lead-generation"
   role_arn   = aws_iam_role.sfn_exec.arn
   definition = templatefile("${path.module}/../backend/step_functions/lead_generation.json", local.sf_substitutions)
+}
+
+resource "aws_sfn_state_machine" "lead_email_existing" {
+  name       = "${local.prefix}-lead-email-existing"
+  role_arn   = aws_iam_role.sfn_exec.arn
+  definition = templatefile("${path.module}/../backend/step_functions/lead_email_existing.json", local.sf_substitutions)
 }
 
 resource "aws_sfn_state_machine" "social_product" {

@@ -17,6 +17,7 @@ SF_PREFIX = os.environ.get("SF_PREFIX", "stellar-wf-prod-")
 
 STATE_MACHINES = {
     "lead-generation": f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}lead-generation",
+    "lead-email-existing": f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}lead-email-existing",
     "social-product":  f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}social-product",
     "social-tech":     f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}social-tech",
     "blog":            f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}blog-post",
