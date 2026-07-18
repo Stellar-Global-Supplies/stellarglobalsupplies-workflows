@@ -165,11 +165,11 @@ resource "aws_s3_bucket_policy" "frontend_oac" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid    = "AllowCloudFrontServicePrincipal"
-      Effect = "Allow"
+      Sid       = "AllowCloudFrontServicePrincipal"
+      Effect    = "Allow"
       Principal = { Service = "cloudfront.amazonaws.com" }
-      Action   = "s3:GetObject"
-      Resource = "${aws_s3_bucket.frontend.arn}/*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.frontend.arn}/*"
       Condition = {
         StringEquals = {
           "AWS:SourceArn" = aws_cloudfront_distribution.frontend.arn
@@ -214,15 +214,15 @@ resource "aws_iam_role" "lambda_exec" {
 }
 
 resource "aws_iam_role_policy" "lambda_policy" {
-  name   = "${local.prefix}-lambda-policy"
-  role   = aws_iam_role.lambda_exec.id
+  name = "${local.prefix}-lambda-policy"
+  role = aws_iam_role.lambda_exec.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "Logs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:*:*:*"
       },
       {
@@ -235,27 +235,27 @@ resource "aws_iam_role_policy" "lambda_policy" {
         ]
       },
       {
-        Sid    = "Bedrock"
-        Effect = "Allow"
-        Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+        Sid      = "Bedrock"
+        Effect   = "Allow"
+        Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
         Resource = "*"
       },
       {
-        Sid    = "StepFunctions"
-        Effect = "Allow"
-        Action = ["states:StartExecution", "states:SendTaskSuccess", "states:SendTaskFailure", "states:DescribeExecution"]
+        Sid      = "StepFunctions"
+        Effect   = "Allow"
+        Action   = ["states:StartExecution", "states:SendTaskSuccess", "states:SendTaskFailure", "states:DescribeExecution"]
         Resource = "*"
       },
       {
-        Sid    = "SSM"
-        Effect = "Allow"
-        Action = ["ssm:GetParameter", "ssm:GetParameters"]
+        Sid      = "SSM"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
         Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/${var.project_name}/*"
       },
       {
-        Sid    = "EventBridge"
-        Effect = "Allow"
-        Action = ["events:PutRule", "events:PutTargets", "events:DeleteRule", "events:RemoveTargets"]
+        Sid      = "EventBridge"
+        Effect   = "Allow"
+        Action   = ["events:PutRule", "events:PutTargets", "events:DeleteRule", "events:RemoveTargets"]
         Resource = "*"
       }
     ]
@@ -278,8 +278,8 @@ resource "aws_iam_role" "sfn_exec" {
 }
 
 resource "aws_iam_role_policy" "sfn_policy" {
-  name   = "${local.prefix}-sfn-policy"
-  role   = aws_iam_role.sfn_exec.id
+  name = "${local.prefix}-sfn-policy"
+  role = aws_iam_role.sfn_exec.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -304,8 +304,8 @@ resource "aws_iam_role" "events_sfn" {
 }
 
 resource "aws_iam_role_policy" "events_sfn_policy" {
-  name   = "${local.prefix}-events-sfn-policy"
-  role   = aws_iam_role.events_sfn.id
+  name = "${local.prefix}-events-sfn-policy"
+  role = aws_iam_role.events_sfn.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -345,22 +345,22 @@ locals {
   }
 
   lambdas = {
-    generate-leads     = { handler = "lead_generation.generate_leads.handler",     source = "../backend/lambdas" }
-    check-duplicate    = { handler = "lead_generation.check_duplicate.handler",    source = "../backend/lambdas" }
-    save-lead          = { handler = "lead_generation.save_lead.handler",          source = "../backend/lambdas" }
-    draft-email        = { handler = "lead_generation.draft_email.handler",        source = "../backend/lambdas" }
-    create-approval    = { handler = "lead_generation.create_approval.handler",    source = "../backend/lambdas" }
-    send-email         = { handler = "lead_generation.send_email.handler",         source = "../backend/lambdas" }
-    schedule-followup  = { handler = "lead_generation.schedule_followup.handler",  source = "../backend/lambdas" }
-    get-orders         = { handler = "social_media.get_orders.handler",            source = "../backend/lambdas" }
-    generate-post      = { handler = "social_media.generate_post.handler",         source = "../backend/lambdas" }
-    post-to-platforms  = { handler = "social_media.post_to_platforms.handler",     source = "../backend/lambdas" }
-    read-s3-context    = { handler = "tech_post.read_s3_context.handler",          source = "../backend/lambdas" }
-    generate-blog      = { handler = "blog_post.generate_blog.handler",            source = "../backend/lambdas" }
-    create-github-pr   = { handler = "blog_post.create_github_pr.handler",         source = "../backend/lambdas" }
-    workflow-trigger   = { handler = "api.workflow_trigger.handler",               source = "../backend/lambdas" }
-    approval-handler   = { handler = "api.approval_handler.handler",               source = "../backend/lambdas" }
-    data-handler       = { handler = "api.data_handler.handler",                   source = "../backend/lambdas" }
+    generate-leads    = { handler = "lead_generation.generate_leads.handler", source = "../backend/lambdas" }
+    check-duplicate   = { handler = "lead_generation.check_duplicate.handler", source = "../backend/lambdas" }
+    save-lead         = { handler = "lead_generation.save_lead.handler", source = "../backend/lambdas" }
+    draft-email       = { handler = "lead_generation.draft_email.handler", source = "../backend/lambdas" }
+    create-approval   = { handler = "lead_generation.create_approval.handler", source = "../backend/lambdas" }
+    send-email        = { handler = "lead_generation.send_email.handler", source = "../backend/lambdas" }
+    schedule-followup = { handler = "lead_generation.schedule_followup.handler", source = "../backend/lambdas" }
+    get-orders        = { handler = "social_media.get_orders.handler", source = "../backend/lambdas" }
+    generate-post     = { handler = "social_media.generate_post.handler", source = "../backend/lambdas" }
+    post-to-platforms = { handler = "social_media.post_to_platforms.handler", source = "../backend/lambdas" }
+    read-s3-context   = { handler = "tech_post.read_s3_context.handler", source = "../backend/lambdas" }
+    generate-blog     = { handler = "blog_post.generate_blog.handler", source = "../backend/lambdas" }
+    create-github-pr  = { handler = "blog_post.create_github_pr.handler", source = "../backend/lambdas" }
+    workflow-trigger  = { handler = "api.workflow_trigger.handler", source = "../backend/lambdas" }
+    approval-handler  = { handler = "api.approval_handler.handler", source = "../backend/lambdas" }
+    data-handler      = { handler = "api.data_handler.handler", source = "../backend/lambdas" }
   }
 }
 
@@ -403,43 +403,43 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
 # ─────────────────────────────────────────────
 locals {
   sf_substitutions = {
-    GenerateLeadsArn     = aws_lambda_function.functions["generate-leads"].arn
-    CheckDuplicateArn    = aws_lambda_function.functions["check-duplicate"].arn
-    SaveLeadArn          = aws_lambda_function.functions["save-lead"].arn
-    DraftEmailArn        = aws_lambda_function.functions["draft-email"].arn
-    CreateApprovalArn    = aws_lambda_function.functions["create-approval"].arn
-    SendEmailArn         = aws_lambda_function.functions["send-email"].arn
-    ScheduleFollowupArn  = aws_lambda_function.functions["schedule-followup"].arn
-    GetOrdersArn         = aws_lambda_function.functions["get-orders"].arn
-    GeneratePostArn      = aws_lambda_function.functions["generate-post"].arn
-    PostToPlatformsArn   = aws_lambda_function.functions["post-to-platforms"].arn
-    ReadS3ContextArn     = aws_lambda_function.functions["read-s3-context"].arn
-    GenerateBlogArn      = aws_lambda_function.functions["generate-blog"].arn
-    CreateGitHubPRArn    = aws_lambda_function.functions["create-github-pr"].arn
+    GenerateLeadsArn    = aws_lambda_function.functions["generate-leads"].arn
+    CheckDuplicateArn   = aws_lambda_function.functions["check-duplicate"].arn
+    SaveLeadArn         = aws_lambda_function.functions["save-lead"].arn
+    DraftEmailArn       = aws_lambda_function.functions["draft-email"].arn
+    CreateApprovalArn   = aws_lambda_function.functions["create-approval"].arn
+    SendEmailArn        = aws_lambda_function.functions["send-email"].arn
+    ScheduleFollowupArn = aws_lambda_function.functions["schedule-followup"].arn
+    GetOrdersArn        = aws_lambda_function.functions["get-orders"].arn
+    GeneratePostArn     = aws_lambda_function.functions["generate-post"].arn
+    PostToPlatformsArn  = aws_lambda_function.functions["post-to-platforms"].arn
+    ReadS3ContextArn    = aws_lambda_function.functions["read-s3-context"].arn
+    GenerateBlogArn     = aws_lambda_function.functions["generate-blog"].arn
+    CreateGitHubPRArn   = aws_lambda_function.functions["create-github-pr"].arn
   }
 }
 
 resource "aws_sfn_state_machine" "lead_generation" {
-  name     = "${local.prefix}-lead-generation"
-  role_arn = aws_iam_role.sfn_exec.arn
+  name       = "${local.prefix}-lead-generation"
+  role_arn   = aws_iam_role.sfn_exec.arn
   definition = templatefile("${path.module}/../backend/step_functions/lead_generation.json", local.sf_substitutions)
 }
 
 resource "aws_sfn_state_machine" "social_product" {
-  name     = "${local.prefix}-social-product"
-  role_arn = aws_iam_role.sfn_exec.arn
+  name       = "${local.prefix}-social-product"
+  role_arn   = aws_iam_role.sfn_exec.arn
   definition = templatefile("${path.module}/../backend/step_functions/social_product.json", local.sf_substitutions)
 }
 
 resource "aws_sfn_state_machine" "social_tech" {
-  name     = "${local.prefix}-social-tech"
-  role_arn = aws_iam_role.sfn_exec.arn
+  name       = "${local.prefix}-social-tech"
+  role_arn   = aws_iam_role.sfn_exec.arn
   definition = templatefile("${path.module}/../backend/step_functions/social_tech.json", local.sf_substitutions)
 }
 
 resource "aws_sfn_state_machine" "blog_post" {
-  name     = "${local.prefix}-blog-post"
-  role_arn = aws_iam_role.sfn_exec.arn
+  name       = "${local.prefix}-blog-post"
+  role_arn   = aws_iam_role.sfn_exec.arn
   definition = templatefile("${path.module}/../backend/step_functions/blog_post.json", local.sf_substitutions)
 }
 
