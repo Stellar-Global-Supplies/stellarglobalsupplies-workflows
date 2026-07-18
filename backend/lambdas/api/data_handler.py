@@ -65,6 +65,7 @@ def handler(event, context):
         social_posts  = db.select("social_posts", params="select=status,type")
         blogs         = db.select("blog_posts",   params="select=status")
         pending_appr  = db.select("approval_queue", params="status=eq.pending&select=id,workflow_type")
+        workflow_runs = db.select("workflow_runs", params="select=id,workflow_type,status,started_at,completed_at,execution_arn&order=started_at.desc&limit=5")
 
         return ok({
             "leads": {
@@ -81,6 +82,7 @@ def handler(event, context):
                 "by_status":   _count_by(blogs, "status"),
             },
             "pending_approvals": len(pending_appr),
+            "workflow_runs": workflow_runs,
         })
 
     return err("Unknown endpoint", 404)

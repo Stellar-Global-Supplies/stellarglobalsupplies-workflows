@@ -26,6 +26,7 @@ export default function Dashboard() {
 
   const stats = data || {}
   const pendingApprovals = approvalsData?.approvals || []
+  const recentRuns = stats.workflow_runs || []
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -123,6 +124,41 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Recent workflow runs */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Recent Workflow Runs</h2>
+          <Link to="/history" className="text-xs text-royal hover:underline flex items-center gap-1">
+            View history <ArrowRight size={12} />
+          </Link>
+        </div>
+        <div className="card overflow-hidden">
+          {recentRuns.length === 0 ? (
+            <div className="p-5">
+              <EmptyState icon={History} title="No workflow runs yet" sub="Launch a workflow to see execution details here." />
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {recentRuns.map(run => (
+                <div key={run.id} className="flex items-center gap-4 px-5 py-4">
+                  <History size={16} className="text-slate-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-navy capitalize">
+                      {run.workflow_type?.replace(/_/g, ' ')}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      {formatDistanceToNow(new Date(run.started_at), { addSuffix: true })}
+                      {run.completed_at && ` · ${(Math.round((new Date(run.completed_at) - new Date(run.started_at)) / 1000))}s`}
+                    </div>
+                  </div>
+                  <StatusBadge status={run.status} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -21,13 +21,21 @@ def _get_key() -> str:
     key = os.environ.get("HUNTER_API_KEY", "")
     if not key:
         from .utils import get_ssm
-        key = get_ssm(os.environ["HUNTER_API_KEY_PARAM"])
+        param = os.environ.get("HUNTER_API_KEY_PARAM", "")
+        if not param:
+            return ""
+        try:
+            key = get_ssm(param)
+        except Exception:
+            return ""
     return key
 
 
 def get_account_info() -> Dict[str, Any]:
     """Returns current plan usage: requests used, requests available."""
     key = _get_key()
+    if not key:
+        return {"used": 0, "available": 0, "error": "hunter_key_missing"}
     url = f"https://api.hunter.io/v2/account?api_key={urllib.parse.quote(key)}"
     req = urllib.request.Request(url, headers={"User-Agent": "StellarWorkflows/1.0"})
     try:
@@ -56,6 +64,8 @@ def domain_search(domain: str, limit: int = 5) -> Optional[Dict]:
     Does NOT consume a credit if Hunter returns cached/empty results.
     """
     key   = _get_key()
+    if not key:
+        return None
     clean = domain.replace("https://", "").replace("http://", "").split("/")[0].strip()
     url   = (
         f"https://api.hunter.io/v2/domain-search"
