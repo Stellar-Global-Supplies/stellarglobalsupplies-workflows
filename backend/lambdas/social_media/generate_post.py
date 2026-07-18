@@ -116,24 +116,26 @@ Return JSON:
     db  = get_client()
     workflow_run_id = event.get("workflowRunId")
     row = {
-        "type":            post_type,
-        "title":           content_data.get("title", ""),
-        "content":         content_data.get("facebook", "")[:500],
-        "content_s3_key":  content_key,
-        "content_url":     content_url,
-        "image_url":       image_url,
-        "image_s3_key":    img_key,
-        "platforms":       {"facebook": True, "instagram": True, "linkedin": True},
-        "status":          "draft",
-        "order_id":        order_id if post_type == "product" else None,
-        "order_uuid":      order_uuid or None if post_type == "product" else None,
-        "repo_name":       repo_name if post_type == "tech" else None,
-        "prompt":          prompt,
-        "workflow_run_id": workflow_run_id,
+        "type":              post_type,
+        "title":             content_data.get("title", ""),
+        "content":           content_data.get("facebook", "")[:500],
+        "content_s3_key":    content_key,
+        "content_url":       content_url,
+        "image_url":         image_url,
+        "image_s3_key":      img_key,
+        "platform":          "multi",
+        "platforms":         {"facebook": True, "instagram": True, "linkedin": True},
+        "status":            "draft",
+        "order_id":          order_id if post_type == "product" else None,
+        "order_uuid":        order_uuid or None if post_type == "product" else None,
+        "repo_name":         repo_name if post_type == "tech" else None,
+        "prompt":            prompt,
+        "workflow_run_id":   workflow_run_id,
         "social_workflow_id": workflow_run_id,
     }
     row = {k: v for k, v in row.items() if v is not None}
     optional_columns = ["content_s3_key", "content_url", "order_uuid", "workflow_run_id", "social_workflow_id"]
+    required_columns = ["platform", "platforms", "type", "content", "status"]
     insert_row = row.copy()
     while True:
         try:
@@ -144,6 +146,10 @@ Return JSON:
             if not missing:
                 raise
             insert_row = {k: v for k, v in insert_row.items() if k != missing}
+            # Ensure required columns are never removed
+            for req_col in required_columns:
+                if req_col in row and req_col not in insert_row:
+                    insert_row[req_col] = row[req_col]
 
     return {
         **event,
