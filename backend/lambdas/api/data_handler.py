@@ -54,6 +54,7 @@ def handler(event, context):
         return ok({"blogs": rows, "count": len(rows)})
 
     elif "/data/workflow-runs" in path:
+        _sync_workflow_runs(db)
         wf_type = qs.get("workflow_type", "")
         base = "order=started_at.desc"
         if wf_type:

@@ -51,8 +51,8 @@ Return valid JSON:
     try:
         image_bytes = generate_image(img_prompt, width=1024, height=1024)
         if image_bytes:
-            base_key           = f"blog-images/{uuid.uuid4()}"
-            img_key, image_url = upload_image_to_s3(image_bytes, base_key)
+            img_key = f"blog-images/{uuid.uuid4()}.png"
+            image_url = upload_image_to_s3(image_bytes, img_key)
         else:
             print("[generate_blog] generate_image returned None — saving without image")
     except Exception as e:
@@ -74,6 +74,7 @@ Return valid JSON:
         "status":          "draft",
         "workflow_run_id": event.get("workflowRunId"),
     }
+    row = {k: v for k, v in row.items() if v is not None}
     saved = db.insert("blog_posts", row)
 
     return {

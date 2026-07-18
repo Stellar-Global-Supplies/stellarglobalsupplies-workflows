@@ -3,7 +3,7 @@ Lambda: generate_social_post
 Generates social media content + image for a product or tech post.
 Image is non-blocking — post saves without image if all options fail.
 """
-import sys, os, uuid
+import sys, os, uuid, urllib.parse
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -21,14 +21,30 @@ def handler(event, context):
     prompt    = event.get("prompt", "")
     order     = event.get("order", {})
     repo_name = event.get("repo_name", "")
+    order_id  = event.get("orderKey") or event.get("orderId") or event.get("order_id") or ""
+    order_uuid = event.get("orderUuid") or ""
 
-    # ── Dedup by order_uuid ───────────────────────────────────
+    # ── Dedup by order id / uuid ───────────────────────────────
     if post_type == "product":
-        order_uuid = event.get("orderUuid") or event.get("orderId", "")
-        if order_uuid:
+        if order_uuid or order_id:
             db   = get_client()
-            rows = db.select("social_posts",
-                             params=f"order_uuid=eq.{order_uuid}&type=eq.product&limit=1")
+            rows = []
+            if order_id:
+                order_id_filter = urllib.parse.quote(str(order_id), safe="")
+                rows = db.select(
+                    "social_posts",
+                    params=f"order_id=eq.{order_id_filter}&type=eq.product&limit=1",
+                )
+            if not rows and order_uuid:
+                order_uuid_filter = urllib.parse.quote(str(order_uuid), safe="")
+                try:
+                    rows = db.select(
+                        "social_posts",
+                        params=f"order_uuid=eq.{order_uuid_filter}&type=eq.product&limit=1",
+                    )
+                except Exception as exc:
+                    if "order_uuid" not in str(exc):
+                        raise
             if rows:
                 return {**event, "isDuplicate": True, "existingPostId": rows[0]["id"]}
 
@@ -76,8 +92,8 @@ Return JSON:
     try:
         image_bytes = generate_image(img_prompt)
         if image_bytes:
-            base_key         = f"social-posts/{post_type}/{uuid.uuid4()}"
-            img_key, image_url = upload_image_to_s3(image_bytes, base_key)
+            img_key = f"social-posts/{post_type}/{uuid.uuid4()}.png"
+            image_url = upload_image_to_s3(image_bytes, img_key)
         else:
             print("[generate_post] generate_image returned None — saving without image")
     except Exception as e:
@@ -93,13 +109,24 @@ Return JSON:
         "image_s3_key":    img_key,
         "platforms":       {"facebook": True, "instagram": True, "linkedin": True},
         "status":          "draft",
-        "order_id":        event.get("orderDisplayId") if post_type == "product" else None,
-        "order_uuid":      event.get("orderUuid")      if post_type == "product" else None,
+        "order_id":        order_id if post_type == "product" else None,
+        "order_uuid":      order_uuid or None if post_type == "product" else None,
         "repo_name":       repo_name if post_type == "tech" else None,
         "prompt":          prompt,
         "workflow_run_id": event.get("workflowRunId"),
     }
-    saved = db.insert("social_posts", row)
+    row = {k: v for k, v in row.items() if v is not None}
+    optional_columns = ["order_uuid", "workflow_run_id"]
+    insert_row = row.copy()
+    while True:
+        try:
+            saved = db.insert("social_posts", insert_row)
+            break
+        except Exception as exc:
+            missing = next((col for col in optional_columns if col in str(exc) and col in insert_row), None)
+            if not missing:
+                raise
+            insert_row = {k: v for k, v in insert_row.items() if k != missing}
 
     return {
         **event,

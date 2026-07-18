@@ -9,25 +9,36 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from shared.supabase_client import get_client
 
 
+def _looks_like_uuid(value: str) -> bool:
+    parts = value.split("-")
+    return len(value) == 36 and len(parts) == 5
+
+
 def handler(event, context):
     """
-    Input: { "order_id": "<uuid>" } OR { "limit": 5, "product_type": "industrial" }
+    Input: { "order_id": "<lookup>" } OR { "limit": 5, "product_type": "industrial" }
     """
     db       = get_client()
-    order_id = event.get("order_id")
+    order_id = event.get("order_id") or event.get("orderLookup")
 
     if order_id:
         order_id_str = str(order_id).strip()
         rows = []
 
-        # Full UUIDs can be queried directly.
-        if len(order_id_str) >= 32:
+        # Full UUIDs can be queried directly against the production orders id.
+        if _looks_like_uuid(order_id_str):
             rows = db.select("orders", params=f"id=eq.{order_id_str}&limit=1")
 
         if not rows:
-            # Support short display IDs / UUID prefixes from the UI by scanning recent rows locally.
+            # Support short display IDs / UUID prefixes from the UI by scanning recent rows locally,
+            # so we do not need schema changes in the production order-management table.
             recent = db.select("orders", params="select=*&order=created_at.desc&limit=100")
-            rows = [r for r in recent if str(r.get("id", "")).startswith(order_id_str)]
+            rows = [
+                r for r in recent
+                if str(r.get("id", "")).startswith(order_id_str)
+                or str(r.get("order_id", "")).lower() == order_id_str.lower()
+                or str(r.get("order_display_id", "")).lower() == order_id_str.lower()
+            ]
     else:
         limit        = event.get("limit", 1)
         product_type = event.get("product_type", "")
@@ -50,11 +61,19 @@ def handler(event, context):
         }]
 
     order = rows[0]
-    order_id_value = str(order.get("id") or order.get("order_display_id") or "")
+    order_uuid = str(order.get("id") or "") if _looks_like_uuid(str(order.get("id") or "")) else ""
+    order_display_id = str(
+        order.get("order_display_id")
+        or order.get("order_id")
+        or order.get("id")
+        or ""
+    )
+    order_key = order_uuid or order_display_id
     return {
         **event,
         "order": order,
-        "orderId": order_id_value,
-        "orderUuid": order_id_value,
-        "orderDisplayId": order_id_value[:8],
+        "orderId": order_key,
+        "orderKey": order_key,
+        "orderUuid": order_uuid,
+        "orderDisplayId": order_display_id[:8],
     }

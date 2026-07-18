@@ -18,11 +18,13 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
   const [note, setNote] = useState('')
   const meta = WF_META[item.workflow_type] || { label: item.workflow_type, icon: CheckSquare }
   const Icon = meta.icon
+  const hasStructuredPreview = item.payload?.post || item.payload?.blog
 
   return (
-    <Modal open title={`Review: ${meta.label}`} onClose={onClose} width="max-w-2xl">
+    <Modal open title={`Review: ${meta.label}`} onClose={onClose} width="max-w-5xl">
       <div className="space-y-4">
         {/* Preview */}
+        {!hasStructuredPreview && (
         <div className="border border-slate-200 rounded-xl overflow-hidden">
           <div className={`flex items-center gap-2 px-4 py-2.5 ${meta.bg} border-b border-slate-200`}>
             <Icon size={15} className={meta.color} />
@@ -36,12 +38,17 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
             </pre>
           )}
         </div>
+        )}
 
         {/* Post content for social/blog */}
         {item.payload?.post && (
           <div className="space-y-3">
-            {item.payload.post.image_url && (
-              <img src={item.payload.post.image_url} alt="" className="w-full h-48 object-cover rounded-xl border border-slate-100" />
+            {item.payload.post.image_url ? (
+              <img src={item.payload.post.image_url} alt="" className="w-full max-h-80 object-contain rounded-xl border border-slate-100 bg-slate-50" />
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 text-center">
+                No image was generated for this post.
+              </div>
             )}
             {['facebook','instagram','linkedin'].map(p => item.payload.post[p] && (
               <div key={p} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
@@ -54,13 +61,22 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
 
         {/* Blog preview */}
         {item.payload?.blog && (
-          <div className="space-y-2">
-            {item.payload.blog.image_url && (
-              <img src={item.payload.blog.image_url} alt="" className="w-full h-40 object-cover rounded-xl border border-slate-100" />
+          <div className="space-y-3">
+            {item.payload.blog.image_url ? (
+              <img src={item.payload.blog.image_url} alt="" className="w-full max-h-96 object-contain rounded-xl border border-slate-100 bg-slate-50" />
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 text-center">
+                No featured image was generated for this blog post.
+              </div>
             )}
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 max-h-48 overflow-y-auto">
-              <div className="text-xs font-semibold text-slate-500 mb-1">{item.payload.blog.title}</div>
-              <p className="text-xs text-slate-600 line-clamp-6">{item.payload.blog.content?.slice(0, 800)}…</p>
+            <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+              <div className="text-base font-semibold text-navy mb-2">{item.payload.blog.title}</div>
+              {item.payload.blog.excerpt && (
+                <p className="text-sm text-slate-500 mb-3">{item.payload.blog.excerpt}</p>
+              )}
+              <pre className="text-sm text-slate-700 whitespace-pre-wrap overflow-y-auto max-h-[52vh] leading-6 font-sans">
+                {item.payload.blog.content || 'No blog content was generated.'}
+              </pre>
             </div>
           </div>
         )}

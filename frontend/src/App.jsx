@@ -8,6 +8,7 @@ import SocialPost  from './pages/SocialMediaPost'
 import TechPost    from './pages/TechPost'
 import BlogPost    from './pages/BlogPost'
 import Approvals   from './pages/ApprovalQueue'
+import WorkflowRuns from './pages/WorkflowRuns'
 import History     from './pages/History'
 
 function Guard({ children }) {
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="tech"     element={<TechPost />} />
             <Route path="blog"     element={<BlogPost />} />
             <Route path="approvals" element={<Approvals />} />
+            <Route path="workflow-runs" element={<WorkflowRuns />} />
             <Route path="history"  element={<History />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

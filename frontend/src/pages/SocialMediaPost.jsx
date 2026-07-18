@@ -71,15 +71,15 @@ export default function SocialMediaPost() {
         <div className="card p-6 max-w-lg">
           <h2 className="font-semibold text-navy mb-4">New Product Post</h2>
           <div className="space-y-4">
-            <FormField label="Order UUID" hint="Leave blank to use the latest order. You can also paste the first 8 chars of the UUID.">
+            <FormField label="Order Lookup" hint="Leave blank to use the latest order. Supports order ID, display ID, or UUID prefix.">
               <input value={form.order_id} onChange={e => setForm(f => ({...f, order_id: e.target.value}))}
-                className="input" placeholder="e.g. 3f2a1c9b (optional)" />
+                className="input" placeholder="e.g. ORD-1042 or 3f2a1c9b" />
             </FormField>
             <FormField label="Product Name" hint="Override order product name (optional)">
               <input value={form.product_name} onChange={e => setForm(f => ({...f, product_name: e.target.value}))}
                 className="input" placeholder="e.g. Industrial Cleaning Bundle" />
             </FormField>
-            <FormField label="Product Category" hint="Filters orders table if no UUID provided">
+            <FormField label="Product Category" hint="Filters orders table if no order lookup is provided">
               <input value={form.product_type} onChange={e => setForm(f => ({...f, product_type: e.target.value}))}
                 className="input" placeholder="e.g. Industrial, Office, Commercial" />
             </FormField>
