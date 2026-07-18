@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS approval_queue (
                   CHECK (workflow_type IN ('lead_email','lead_followup','social_product','social_tech','blog')),
   reference_id    UUID NOT NULL,
   task_token      TEXT NOT NULL,
+  workflow_run_id UUID,
   payload         JSONB DEFAULT '{}',
   preview_html    TEXT,
   status          TEXT NOT NULL DEFAULT 'pending'
@@ -147,9 +148,12 @@ CREATE TABLE IF NOT EXISTS approval_queue (
   expires_at      TIMESTAMPTZ DEFAULT NOW() + INTERVAL '7 days',
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE approval_queue
+  ADD COLUMN IF NOT EXISTS workflow_run_id UUID;
 CREATE INDEX idx_approval_queue_status        ON approval_queue(status);
 CREATE INDEX idx_approval_queue_workflow_type ON approval_queue(workflow_type);
 CREATE INDEX idx_approval_queue_reference_id  ON approval_queue(reference_id);
+CREATE INDEX IF NOT EXISTS idx_approval_queue_workflow_run_id ON approval_queue(workflow_run_id);
 
 -- ============================================================
 -- WORKFLOW RUNS

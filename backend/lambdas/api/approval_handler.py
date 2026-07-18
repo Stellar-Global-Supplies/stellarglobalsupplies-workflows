@@ -19,7 +19,7 @@ def handler(event, context):
         return ok({})
 
     method      = event.get("httpMethod", "GET")
-    path        = event.get("path", "")
+    path        = event.get("path") or event.get("rawPath", "")
     path_params = event.get("pathParameters") or {}
     approval_id = path_params.get("id")
 
@@ -77,6 +77,18 @@ def handler(event, context):
             "reviewed_at": now,
         }, params=f"id=eq.{approval_id}")
 
+        workflow_run_id = item.get("workflow_run_id") or item.get("payload", {}).get("workflowRunId")
+        if workflow_run_id:
+            db.update("workflow_runs", {
+                "status":       "succeeded",
+                "completed_at":  now,
+                "output":        {
+                    "approved": True,
+                    "note": reviewer_note,
+                    "approval_id": approval_id,
+                },
+            }, params=f"id=eq.{workflow_run_id}")
+
         return ok({"message": "Approved", "approvalId": approval_id})
 
     elif path.endswith("/reject"):
@@ -90,6 +102,19 @@ def handler(event, context):
             "review_note": reviewer_note,
             "reviewed_at": now,
         }, params=f"id=eq.{approval_id}")
+
+        workflow_run_id = item.get("workflow_run_id") or item.get("payload", {}).get("workflowRunId")
+        if workflow_run_id:
+            db.update("workflow_runs", {
+                "status":       "failed",
+                "completed_at":  now,
+                "error_msg":    reviewer_note or "Rejected by reviewer",
+                "output":       {
+                    "approved": False,
+                    "note": reviewer_note,
+                    "approval_id": approval_id,
+                },
+            }, params=f"id=eq.{workflow_run_id}")
 
         return ok({"message": "Rejected", "approvalId": approval_id})
 

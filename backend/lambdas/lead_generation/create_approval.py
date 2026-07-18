@@ -24,6 +24,7 @@ def handler(event, context):
     task_token    = event["taskToken"]
     workflow_type = event["workflowType"]
     data          = event["data"]
+    workflow_run_id = data.get("workflowRunId")
 
     # Determine reference_id
     if workflow_type in ("lead_email", "lead_followup"):
@@ -52,6 +53,7 @@ def handler(event, context):
         "workflow_type": workflow_type,
         "reference_id":  str(reference_id),
         "task_token":    task_token,
+        "workflow_run_id": workflow_run_id,
         "payload":       payload,
         "preview_html":  preview_html,
         "status":        "pending",
