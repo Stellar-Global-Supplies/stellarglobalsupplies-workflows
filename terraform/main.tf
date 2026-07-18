@@ -392,8 +392,8 @@ locals {
     IG_ACCOUNT_ID_PARAM       = "/${var.project_name}/instagram/account_id"
     IG_ACCESS_TOKEN_PARAM     = "/${var.project_name}/instagram/access_token"
     GITHUB_TOKEN_PARAM        = "/${var.project_name}/github/token"
-    WEBSITE_REPO_OWNER        = var.website_repo_owner
-    WEBSITE_REPO_NAME         = var.website_repo_name
+    WEBSITE_REPO_OWNER        = "Stellar-Global-Supplies"
+    WEBSITE_REPO_NAME         = "stellarglobalsupplies-website"
     WEBSITE_BASE_BRANCH       = "main"
     WEBSITE_BLOG_DIR          = "content/blog"
     EVENTS_ROLE_ARN           = aws_iam_role.events_sfn.arn

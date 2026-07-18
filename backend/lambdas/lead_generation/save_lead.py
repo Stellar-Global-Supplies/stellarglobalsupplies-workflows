@@ -22,7 +22,7 @@ def handler(event, context):
         "address":         lead.get("address"),
         "contact_name":    lead.get("contact_name"),
         "description":     lead.get("description"),
-        "status":          "pending",
+        "status":          "approved",
         "source":          lead.get("source", "ai_generated"),
         "workflow_run_id": event.get("workflowRunId"),
     }

@@ -61,11 +61,13 @@ variable "sender_email" {
 variable "website_repo_owner" {
   description = "GitHub org/user owning the website repo"
   type        = string
+  default     = "Stellar-Global-Supplies"
 }
 
 variable "website_repo_name" {
   description = "GitHub repo name for the company website"
   type        = string
+  default     = "stellarglobalsupplies-website"
 }
 
 variable "context_bucket" {

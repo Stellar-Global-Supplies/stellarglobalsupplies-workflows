@@ -27,7 +27,28 @@ def handler(event, context):
     workflow_run_id = data.get("workflowRunId")
 
     # Determine reference_id
-    if workflow_type in ("lead_email", "lead_followup"):
+    if workflow_type == "lead_approval":
+        reference_id = data.get("leadId")
+        lead = data.get("lead", {})
+        payload = {
+            "lead":      lead,
+            "lead_id":   data.get("leadId"),
+        }
+        # Build HTML preview for lead approval
+        preview_html = f"""
+<div style="font-family:Arial,sans-serif;max-width:600px">
+  <h2>New Lead for Approval</h2>
+  <p><strong>Company:</strong> {lead.get('company_name', 'N/A')}</p>
+  <p><strong>Contact:</strong> {lead.get('contact_name', 'N/A')}</p>
+  <p><strong>Email:</strong> {lead.get('email', 'N/A')}</p>
+  <p><strong>Phone:</strong> {lead.get('phone', 'N/A')}</p>
+  <p><strong>Industry:</strong> {lead.get('industry', 'N/A')}</p>
+  <p><strong>Website:</strong> {lead.get('website', 'N/A')}</p>
+  <p><strong>Address:</strong> {lead.get('address', 'N/A')}</p>
+  <p><strong>Description:</strong> {lead.get('description', 'N/A')}</p>
+  <p><strong>Source:</strong> {lead.get('source', 'N/A')}</p>
+</div>"""
+    elif workflow_type in ("lead_email", "lead_followup"):
         reference_id = data.get("emailDraftId") or data.get("leadId")
         payload = {
             "lead":        data.get("lead"),

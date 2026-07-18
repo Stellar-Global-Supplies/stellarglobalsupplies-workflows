@@ -119,6 +119,7 @@ Return JSON:
         "type":              post_type,
         "title":             content_data.get("title", ""),
         "content":           content_data.get("facebook", "")[:500],
+        "caption":           content_data.get("instagram", ""),
         "content_s3_key":    content_key,
         "content_url":       content_url,
         "image_url":         image_url,

@@ -45,10 +45,18 @@ def handler(event, context):
         blog = {**blog, **read_json_from_s3(blog["content_s3_key"])}
 
     token      = get_ssm(os.environ["GITHUB_TOKEN_PARAM"])
-    repo_owner = os.environ["WEBSITE_REPO_OWNER"]
-    repo_name  = os.environ["WEBSITE_REPO_NAME"]
+    repo_owner = os.environ.get("WEBSITE_REPO_OWNER", "")
+    repo_name  = os.environ.get("WEBSITE_REPO_NAME", "")
     base_branch = os.environ.get("WEBSITE_BASE_BRANCH", "main")
     blog_dir    = os.environ.get("WEBSITE_BLOG_DIR", "content/blog")
+
+    # Validate required configuration
+    if not repo_owner or not repo_name:
+        raise ValueError(
+            f"Missing GitHub repository configuration: "
+            f"WEBSITE_REPO_OWNER='{repo_owner}', WEBSITE_REPO_NAME='{repo_name}'. "
+            f"Please set these environment variables or Terraform variables."
+        )
 
     # 1. Get base branch SHA
     ref_data    = gh_request("GET", f"/repos/{repo_owner}/{repo_name}/git/ref/heads/{base_branch}", token)

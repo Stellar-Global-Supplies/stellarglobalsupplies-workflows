@@ -1,5 +1,5 @@
 {
-  "Comment": "Lead Generation Workflow - Generate, deduplicate, save, draft email, await approval, send, follow-up",
+  "Comment": "Lead Generation Workflow - Generate, deduplicate, await approval, save if approved",
   "StartAt": "GenerateLeads",
   "States": {
     "GenerateLeads": {
@@ -33,35 +33,19 @@
           "Next": "DuplicateFound"
         }
       ],
-      "Default": "SaveLead"
+      "Default": "WaitForLeadApproval"
     },
     "DuplicateFound": {
       "Type": "Succeed"
     },
-    "SaveLead": {
-      "Type": "Task",
-      "Resource": "${SaveLeadArn}",
-      "ResultPath": "$",
-      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 2, "MaxAttempts": 3}],
-      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
-      "Next": "DraftEmail"
-    },
-    "DraftEmail": {
-      "Type": "Task",
-      "Resource": "${DraftEmailArn}",
-      "ResultPath": "$",
-      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
-      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
-      "Next": "WaitForEmailApproval"
-    },
-    "WaitForEmailApproval": {
+    "WaitForLeadApproval": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "Parameters": {
         "FunctionName": "${CreateApprovalArn}",
         "Payload": {
           "taskToken.$": "$$.Task.Token",
-          "workflowType": "lead_email",
+          "workflowType": "lead_approval",
           "data.$": "$"
         }
       },
@@ -76,28 +60,21 @@
         },
         {
           "ErrorEquals": ["Rejected"],
-          "Next": "EmailRejected",
+          "Next": "LeadRejected",
           "ResultPath": "$.error"
         }
       ],
-      "Next": "SendEmail"
+      "Next": "SaveLead"
     },
-    "SendEmail": {
+    "SaveLead": {
       "Type": "Task",
-      "Resource": "${SendEmailArn}",
+      "Resource": "${SaveLeadArn}",
       "ResultPath": "$",
-      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 2, "MaxAttempts": 3}],
       "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
-      "Next": "ScheduleFollowup"
-    },
-    "ScheduleFollowup": {
-      "Type": "Task",
-      "Resource": "${ScheduleFollowupArn}",
-      "ResultPath": "$",
-      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 2}],
       "End": true
     },
-    "EmailRejected": {
+    "LeadRejected": {
       "Type": "Succeed"
     },
     "ApprovalExpired": {
