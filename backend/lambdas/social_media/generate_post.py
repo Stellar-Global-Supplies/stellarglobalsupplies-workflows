@@ -152,7 +152,10 @@ Return JSON:
         "content_url":       content_url,
         "image_url":         image_url,
         "image_s3_key":      img_key,
-        "platform":          "multi",
+        # "platform" TEXT column has a check constraint limiting values to
+        # 'facebook' | 'instagram' | 'linkedin' — 'multi' is not allowed.
+        # Use the primary/lead platform: linkedin for tech posts (B2B), facebook for product posts.
+        "platform":          "linkedin" if post_type == "tech" else "facebook",
         "platforms":         {"facebook": True, "instagram": True, "linkedin": True},
         "status":            "draft",
         "order_id":          order_id if post_type == "product" else None,
