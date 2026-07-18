@@ -2,6 +2,16 @@
 Lambda: generate_social_post
 Generates social media content + image for a product or tech post.
 Image is non-blocking — post saves without image if all options fail.
+
+Schema reference (social_posts — live production):
+  NOT NULL required: social_workflow_id, platform, caption, raw_caption,
+                     hashtags, status, orders_included, week_start
+  status allowed:    pending_approval | approved_manual | publishing |
+                     published | rejected | publish_failed
+  platform allowed:  linkedin | facebook | instagram
+  Nullable extras:   type, title, content, image_url, image_s3_key,
+                     platforms, order_id, repo_name, prompt, post_results,
+                     posted_at, workflow_run_id, content_s3_key, content_url
 """
 import sys, os, uuid, urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -26,32 +36,31 @@ def handler(event, context):
     order_uuid = event.get("orderUuid") or ""
     context_text = event.get("contextText", "")
 
-    print(f"[generate_post] START post_type={post_type!r} repo_name={repo_name!r} order_id={order_id!r}")
+    # social_workflow_id is NOT NULL with FK to social_workflows — must be a real UUID
+    social_workflow_id = (
+        event.get("socialWorkflowId")
+        or event.get("social_workflow_id")
+        or event.get("workflowRunId")
+        or event.get("workflow_run_id")
+        or ""
+    )
 
-    # ── Dedup by order id / uuid ───────────────────────────────
-    if post_type == "product":
-        if order_uuid or order_id:
-            db   = get_client()
-            rows = []
-            if order_id:
-                order_id_filter = urllib.parse.quote(str(order_id), safe="")
-                rows = db.select(
-                    "social_posts",
-                    params=f"order_id=eq.{order_id_filter}&type=eq.product&limit=1",
-                )
-            if not rows and order_uuid:
-                order_uuid_filter = urllib.parse.quote(str(order_uuid), safe="")
-                try:
-                    rows = db.select(
-                        "social_posts",
-                        params=f"order_uuid=eq.{order_uuid_filter}&type=eq.product&limit=1",
-                    )
-                except Exception as exc:
-                    if "order_uuid" not in str(exc):
-                        raise
-            if rows:
-                print(f"[generate_post] duplicate found — skipping")
-                return {**event, "isDuplicate": True, "existingPostId": rows[0]["id"]}
+    print(f"[generate_post] START post_type={post_type!r} repo_name={repo_name!r} order_id={order_id!r} social_workflow_id={social_workflow_id!r}")
+
+    if not social_workflow_id:
+        raise ValueError("[generate_post] social_workflow_id is required (NOT NULL FK) but was not provided in the event")
+
+    # ── Dedup by order id ─────────────────────────────────────
+    if post_type == "product" and order_id:
+        db  = get_client()
+        order_id_filter = urllib.parse.quote(str(order_id), safe="")
+        rows = db.select(
+            "social_posts",
+            params=f"order_id=eq.{order_id_filter}&type=eq.product&limit=1",
+        )
+        if rows:
+            print(f"[generate_post] duplicate found — skipping")
+            return {**event, "isDuplicate": True, "existingPostId": rows[0]["id"]}
 
     # ── Generate text content ─────────────────────────────────
     print(f"[generate_post] calling Bedrock to generate {post_type} post content")
@@ -70,6 +79,7 @@ Return JSON:
   "facebook": "facebook post text with hashtags",
   "instagram": "instagram caption with hashtags",
   "linkedin":  "linkedin post (professional tone)",
+  "hashtags": ["tag1", "tag2", "tag3"],
   "image_prompt": "detailed prompt for generating a product showcase image"
 }}"""
     else:
@@ -85,11 +95,13 @@ Return JSON:
   "facebook": "facebook post text",
   "instagram": "instagram caption",
   "linkedin": "linkedin post (professional)",
+  "hashtags": ["tag1", "tag2", "tag3"],
   "image_prompt": "prompt for a modern tech/digital workflow image"
 }}"""
 
     content_data = generate_json(gen_prompt, system=SYSTEM, max_tokens=1200)
     print(f"[generate_post] Bedrock text generation complete, title={content_data.get('title','')!r}")
+
     content_key = f"generated-content/social-posts/{post_type}/{uuid.uuid4()}.json"
     content_url = upload_json_to_s3({
         "type": post_type,
@@ -97,6 +109,7 @@ Return JSON:
         "facebook": content_data.get("facebook", ""),
         "instagram": content_data.get("instagram", ""),
         "linkedin": content_data.get("linkedin", ""),
+        "hashtags": content_data.get("hashtags", []),
         "image_prompt": content_data.get("image_prompt", ""),
         "prompt": prompt,
         "repo_name": repo_name,
@@ -122,73 +135,66 @@ Return JSON:
     except Exception as e:
         print(f"[generate_post] image step failed ({e}) — saving without image")
 
-    # ── Save to Supabase ──────────────────────────────────────
+    # ── Build insert row aligned to live schema ───────────────
     print(f"[generate_post] saving post to Supabase")
-    db  = get_client()
-    workflow_run_id = event.get("workflowRunId")
+    db = get_client()
 
-    # week_start: Monday of the current UTC week (required NOT NULL column)
+    # week_start: Monday of the current UTC week (NOT NULL)
     today = datetime.now(timezone.utc).date()
     week_start = (today - timedelta(days=today.weekday())).isoformat()
 
-    # caption must never be None/empty — fall back through instagram → facebook → title
+    # caption: NOT NULL — fall back through platform-specific → title
+    # Primary platform is linkedin for tech (B2B), facebook for product
+    primary_platform = "linkedin" if post_type == "tech" else "facebook"
     caption = (
-        content_data.get("instagram")
+        content_data.get(primary_platform)
+        or content_data.get("instagram")
         or content_data.get("facebook")
         or content_data.get("title")
         or ""
     )
 
-    # order_uuid must be a real UUID string or omitted — never the string "None"
-    safe_order_uuid = order_uuid if (order_uuid and order_uuid != "None") else None
+    # hashtags: NOT NULL array — parse from AI response or default empty
+    raw_hashtags = content_data.get("hashtags", [])
+    if isinstance(raw_hashtags, str):
+        # AI sometimes returns a space-separated string
+        raw_hashtags = [h.lstrip("#") for h in raw_hashtags.split() if h]
+    hashtags = [str(h).lstrip("#") for h in raw_hashtags if h] if raw_hashtags else []
 
+    # NOT NULL columns (must always be present)
     row = {
-        "type":              post_type,
-        "title":             content_data.get("title", ""),
-        "content":           content_data.get("facebook", "")[:500],
-        "caption":           caption,
-        "week_start":        week_start,
-        "content_s3_key":    content_key,
-        "content_url":       content_url,
-        "image_url":         image_url,
-        "image_s3_key":      img_key,
-        # "platform" TEXT column has a check constraint limiting values to
-        # 'facebook' | 'instagram' | 'linkedin' — 'multi' is not allowed.
-        # Use the primary/lead platform: linkedin for tech posts (B2B), facebook for product posts.
-        "platform":          "linkedin" if post_type == "tech" else "facebook",
-        "platforms":         {"facebook": True, "instagram": True, "linkedin": True},
-        "status":            "draft",
-        "order_id":          order_id if post_type == "product" else None,
-        "order_uuid":        safe_order_uuid if post_type == "product" else None,
-        "repo_name":         repo_name if post_type == "tech" else None,
-        "prompt":            prompt,
-        "workflow_run_id":   workflow_run_id,
-        "social_workflow_id": workflow_run_id,
+        "social_workflow_id": social_workflow_id,
+        "platform":           primary_platform,
+        "caption":            caption,
+        "raw_caption":        caption,
+        "hashtags":           hashtags,
+        "status":             "pending_approval",
+        "orders_included":    [],
+        "week_start":         week_start,
     }
-    row = {k: v for k, v in row.items() if v is not None}
-    # optional_columns: stripped one-by-one if the DB column does not exist yet.
-    # required_columns: MUST NOT overlap with optional_columns — any column in both
-    #   lists causes an infinite loop (removed then immediately re-added each iteration).
-    # "platform" (TEXT label) is required (NOT NULL in DB); "platforms" (JSONB map) is also required.
-    # "caption" and "week_start" are also optional (added by migration 005).
-    optional_columns = ["content_s3_key", "content_url", "order_uuid", "workflow_run_id", "social_workflow_id",
-                        "caption", "week_start", "image_url", "image_s3_key", "repo_name", "order_id"]
-    required_columns = ["platform", "platforms", "type", "content", "status"]
-    print(f"[generate_post] Insert row to Supabase")
-    insert_row = row.copy()
-    while True:
-        try:
-            saved = db.insert("social_posts", insert_row)
-            break
-        except Exception as exc:
-            missing = next((col for col in optional_columns if col in str(exc) and col in insert_row), None)
-            if not missing:
-                raise
-            insert_row = {k: v for k, v in insert_row.items() if k != missing}
-            # Ensure required columns are never removed
-            for req_col in required_columns:
-                if req_col in row and req_col not in insert_row:
-                    insert_row[req_col] = row[req_col]
+
+    # Nullable / optional columns (omit if no value)
+    optional = {
+        "type":           post_type,
+        "title":          content_data.get("title") or None,
+        "content":        (content_data.get("facebook") or "")[:500] or None,
+        "image_url":      image_url,
+        "image_s3_key":   img_key,
+        "image_prompt":   img_prompt or None,
+        "platforms":      {"facebook": True, "instagram": True, "linkedin": True},
+        "order_id":       order_id if post_type == "product" and order_id else None,
+        "repo_name":      repo_name if post_type == "tech" and repo_name else None,
+        "prompt":         prompt or None,
+        "workflow_run_id": event.get("workflowRunId") or event.get("workflow_run_id") or None,
+        "content_s3_key": content_key,
+        "content_url":    content_url,
+    }
+    for k, v in optional.items():
+        if v is not None:
+            row[k] = v
+
+    print(f"[generate_post] inserting row keys={list(row.keys())}")
+    saved = db.insert("social_posts", row)
 
     print(f"[generate_post] DONE postId={saved['id']}")
     return {
@@ -197,11 +203,11 @@ Return JSON:
         "postId":      saved["id"],
         "post":        {
             **saved,
-            "title": content_data.get("title", ""),
-            "content": content_data.get("facebook", "")[:500],
+            "title":         content_data.get("title", ""),
+            "content":       (content_data.get("facebook") or "")[:500],
             "content_s3_key": content_key,
-            "content_url": content_url,
-            "image_url": image_url,
-            "hasImage": image_url is not None,
+            "content_url":   content_url,
+            "image_url":     image_url,
+            "hasImage":      image_url is not None,
         },
     }
