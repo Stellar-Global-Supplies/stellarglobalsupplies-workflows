@@ -213,4 +213,4 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
 
     # ── 5. Branded SVG placeholder (always works) ─────────────
     log.warning("[bedrock] all AI models failed — using branded SVG placeholder")
-    return _branded_svg_placeholder(prompt, width, height)
+    return _branded_svg_placeholder(prompt, width, height) 
