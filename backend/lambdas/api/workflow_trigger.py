@@ -13,11 +13,13 @@ import boto3
 from shared.supabase_client import get_client
 from shared.utils import ok, err, now_iso
 
+SF_PREFIX = os.environ.get("SF_PREFIX", "stellar-wf-prod-")
+
 STATE_MACHINES = {
-    "lead-generation": os.environ.get("SF_LEAD_GEN_ARN", ""),
-    "social-product":  os.environ.get("SF_SOCIAL_PRODUCT_ARN", ""),
-    "social-tech":     os.environ.get("SF_SOCIAL_TECH_ARN", ""),
-    "blog":            os.environ.get("SF_BLOG_ARN", ""),
+    "lead-generation": f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}lead-generation",
+    "social-product":  f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}social-product",
+    "social-tech":     f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}social-tech",
+    "blog":            f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}blog-post",
 }
 
 

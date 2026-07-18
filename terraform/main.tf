@@ -383,10 +383,7 @@ resource "aws_lambda_function" "functions" {
 
   environment {
     variables = merge(local.lambda_env, {
-      SF_LEAD_GEN_ARN       = try(aws_sfn_state_machine.lead_generation.arn, "")
-      SF_SOCIAL_PRODUCT_ARN = try(aws_sfn_state_machine.social_product.arn, "")
-      SF_SOCIAL_TECH_ARN    = try(aws_sfn_state_machine.social_tech.arn, "")
-      SF_BLOG_ARN           = try(aws_sfn_state_machine.blog_post.arn, "")
+      SF_PREFIX = "${local.prefix}-"
     })
   }
 
