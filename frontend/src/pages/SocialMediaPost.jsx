@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { startWorkflow, getSocialPosts } from '../services/api'
+import { startWorkflow, getSocialPosts, repostSocialPost, lookupOrder } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
-import { Share2, Play, Facebook, Instagram, Linkedin, Image as ImgIcon } from 'lucide-react'
+import { Share2, Play, Facebook, Instagram, Linkedin, Image as ImgIcon, Repeat2, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -16,6 +16,8 @@ export default function SocialMediaPost() {
     prompt: '',
   })
   const [running, setRunning] = useState(false)
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [orderPreview, setOrderPreview] = useState(null)
   const [tab, setTab] = useState('launch')
 
   const { data, isLoading } = useQuery({
@@ -46,6 +48,30 @@ export default function SocialMediaPost() {
     }
   }
 
+  async function postAgain(id) {
+    try {
+      await repostSocialPost(id)
+      toast.success('Product post sent again.')
+      qc.invalidateQueries(['social-posts'])
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  async function previewOrder() {
+    setLookupLoading(true)
+    try {
+      const res = await lookupOrder(form.order_id, form.product_type)
+      setOrderPreview(res)
+      toast.success(`Order matched — ${res.orderDisplayId || res.orderId}`)
+    } catch (e) {
+      setOrderPreview(null)
+      toast.error(e.message)
+    } finally {
+      setLookupLoading(false)
+    }
+  }
+
   const PlatformIcon = ({ platform, active }) => {
     const icons = { facebook: Facebook, instagram: Instagram, linkedin: Linkedin }
     const Ic = icons[platform] || Share2
@@ -71,10 +97,25 @@ export default function SocialMediaPost() {
         <div className="card p-6 max-w-lg">
           <h2 className="font-semibold text-navy mb-4">New Product Post</h2>
           <div className="space-y-4">
-            <FormField label="Order Lookup" hint="Leave blank to use the latest order. Supports order ID, display ID, or UUID prefix.">
-              <input value={form.order_id} onChange={e => setForm(f => ({...f, order_id: e.target.value}))}
-                className="input" placeholder="e.g. ORD-1042 or 3f2a1c9b" />
+            <FormField label="Order Lookup" hint="Leave blank to use the latest order. Supports order UUID or tracking token prefix.">
+              <div className="flex gap-2">
+                <input value={form.order_id} onChange={e => setForm(f => ({...f, order_id: e.target.value}))}
+                  className="input" placeholder="e.g. order UUID or tracking token" />
+                <button onClick={previewOrder} disabled={lookupLoading} className="btn-secondary flex-shrink-0">
+                  <Search size={14} /> Lookup
+                </button>
+              </div>
             </FormField>
+            {orderPreview?.order && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                <div className="font-semibold text-navy mb-1">{orderPreview.order.product_name || 'Matched order'}</div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  <span>Order: {orderPreview.orderDisplayId || orderPreview.orderId}</span>
+                  {orderPreview.order.product_category && <span>Type: {orderPreview.order.product_category}</span>}
+                  {orderPreview.order.customer_segment && <span>Customer: {orderPreview.order.customer_segment}</span>}
+                </div>
+              </div>
+            )}
             <FormField label="Product Name" hint="Override order product name (optional)">
               <input value={form.product_name} onChange={e => setForm(f => ({...f, product_name: e.target.value}))}
                 className="input" placeholder="e.g. Industrial Cleaning Bundle" />
@@ -144,6 +185,9 @@ export default function SocialMediaPost() {
                       </span>
                     </div>
                   </div>
+                  <button onClick={() => postAgain(post.id)} className="btn-secondary text-xs py-1.5 h-fit">
+                    <Repeat2 size={13} /> Post Again
+                  </button>
                 </div>
               ))}
             </div>

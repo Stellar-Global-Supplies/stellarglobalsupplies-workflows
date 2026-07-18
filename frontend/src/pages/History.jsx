@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getLeads, getSocialPosts, getBlogPosts, getWorkflowRuns } from '../services/api'
+import { getLeads, getSocialPosts, getBlogPosts, getWorkflowRuns, repostSocialPost, republishBlogPost } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, Skeleton } from '../components/ui'
-import { History, Users, Share2, FileText, Zap, ExternalLink, GitPullRequest, CheckCircle, XCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { History, Users, Share2, FileText, Zap, GitPullRequest, CheckCircle, XCircle, ChevronDown, ChevronRight, Repeat2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { formatDistanceToNow, format } from 'date-fns'
 
 const TABS = [
@@ -30,6 +31,24 @@ export default function HistoryPage() {
   const runs    = runsData?.runs     || []
 
   const isLoading = { leads: ll, product: lp, tech: lt, blogs: lb, runs: lr }[tab]
+
+  async function postAgain(id) {
+    try {
+      await repostSocialPost(id)
+      toast.success('Post sent again.')
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  async function publishAgain(id) {
+    try {
+      await republishBlogPost(id)
+      toast.success('Blog PR created again.')
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -126,6 +145,9 @@ export default function HistoryPage() {
                     <div className="text-xs text-slate-400 flex-shrink-0">
                       {format(new Date(post.created_at), 'dd MMM yy')}
                     </div>
+                    <button onClick={() => postAgain(post.id)} className="btn-secondary text-xs py-1.5 h-fit">
+                      <Repeat2 size={13} /> Post Again
+                    </button>
                   </div>
                 ))}
               </div>
@@ -166,6 +188,9 @@ export default function HistoryPage() {
                       )}
                     </div>
                   </div>
+                  <button onClick={() => publishAgain(blog.id)} className="btn-secondary text-xs py-1.5 h-fit">
+                    <Repeat2 size={13} /> Publish Again
+                  </button>
                 </div>
               ))}
             </div>

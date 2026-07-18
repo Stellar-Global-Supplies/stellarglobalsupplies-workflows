@@ -10,7 +10,7 @@ import json
 import urllib.request
 import urllib.parse
 from shared.supabase_client import get_client
-from shared.utils import get_ssm, now_iso
+from shared.utils import get_ssm, now_iso, read_json_from_s3
 
 
 def post_facebook(page_id: str, access_token: str, message: str, image_url: str) -> dict:
@@ -80,6 +80,8 @@ def post_instagram(ig_account_id: str, access_token: str, caption: str, image_ur
 def handler(event, context):
     post      = event["post"]
     post_id   = event["postId"]
+    if post.get("content_s3_key"):
+        post = {**post, **read_json_from_s3(post["content_s3_key"])}
     platforms = post.get("platforms", {"facebook": True, "instagram": True, "linkedin": True})
     image_url = post.get("image_url", "")
 

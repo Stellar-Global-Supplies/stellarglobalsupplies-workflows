@@ -66,6 +66,28 @@ def upload_image_to_s3(image_bytes: bytes, key: str, content_type: str = "image/
     return f"{cloudfront_url}/{key}"
 
 
+def upload_json_to_s3(data: Any, key: str) -> str:
+    """Upload generated JSON content to S3 and return CloudFront URL."""
+    s3 = boto3.client("s3")
+    bucket = os.environ["ASSETS_BUCKET"]
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(data, default=str).encode("utf-8"),
+        ContentType="application/json",
+    )
+    cloudfront_url = os.environ.get("ASSETS_CLOUDFRONT_URL", "").rstrip("/")
+    return f"{cloudfront_url}/{key}"
+
+
+def read_json_from_s3(key: str) -> Any:
+    """Read generated JSON content from the assets bucket."""
+    s3 = boto3.client("s3")
+    bucket = os.environ["ASSETS_BUCKET"]
+    resp = s3.get_object(Bucket=bucket, Key=key)
+    return json.loads(resp["Body"].read().decode("utf-8"))
+
+
 def get_ssm(name: str) -> str:
     """Fetch SecureString from SSM Parameter Store."""
     ssm = boto3.client("ssm")

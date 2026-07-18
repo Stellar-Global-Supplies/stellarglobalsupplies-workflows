@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { startWorkflow, getSocialPosts } from '../services/api'
+import { startWorkflow, getSocialPosts, repostSocialPost } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
-import { Code2, Play, Image as ImgIcon } from 'lucide-react'
+import { Code2, Play, Image as ImgIcon, Repeat2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -30,6 +30,16 @@ export default function TechPost() {
       toast.error(e.message)
     } finally {
       setRunning(false)
+    }
+  }
+
+  async function postAgain(id) {
+    try {
+      await repostSocialPost(id)
+      toast.success('Tech post sent again.')
+      qc.invalidateQueries(['social-posts'])
+    } catch (e) {
+      toast.error(e.message)
     }
   }
 
@@ -104,6 +114,9 @@ export default function TechPost() {
                       {post.repo_name && <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{post.repo_name}</span>}
                     </div>
                   </div>
+                  <button onClick={() => postAgain(post.id)} className="btn-secondary text-xs py-1.5 h-fit">
+                    <Repeat2 size={13} /> Post Again
+                  </button>
                 </div>
               ))}
             </div>

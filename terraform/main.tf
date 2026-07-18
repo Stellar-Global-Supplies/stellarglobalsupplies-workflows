@@ -606,6 +606,12 @@ resource "aws_apigatewayv2_route" "data" {
   target    = "integrations/${aws_apigatewayv2_integration.data_handler.id}"
 }
 
+resource "aws_apigatewayv2_route" "data_actions" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /data/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.data_handler.id}"
+}
+
 # Lambda permissions for API Gateway
 resource "aws_lambda_permission" "apigw_trigger" {
   for_each      = toset(["workflow-trigger", "approval-handler", "data-handler"])

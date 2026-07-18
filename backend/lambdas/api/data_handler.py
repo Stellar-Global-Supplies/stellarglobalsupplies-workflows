@@ -12,8 +12,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import boto3
 import json
+import re
 from shared.supabase_client import get_client
-from shared.utils import ok, err
+from shared.utils import ok, err, read_json_from_s3
+from social_media.get_orders import handler as get_orders_handler
+from social_media.post_to_platforms import handler as post_to_platforms_handler
+from blog_post.create_github_pr import handler as create_github_pr_handler
+
+
+def _http_method(event):
+    return (
+        event.get("httpMethod")
+        or (event.get("requestContext") or {}).get("http", {}).get("method")
+        or "GET"
+    ).upper()
 
 
 def handler(event, context):
@@ -23,6 +35,7 @@ def handler(event, context):
     path    = event.get("path") or event.get("rawPath", "")
     qs      = event.get("queryStringParameters") or {}
     db      = get_client()
+    method  = _http_method(event)
     limit   = int(qs.get("limit", 50))
     offset  = int(qs.get("offset", 0))
     status  = qs.get("status", "")
@@ -33,6 +46,23 @@ def handler(event, context):
             params += f"&status=eq.{table_status}"
         params += f"&limit={limit}&offset={offset}"
         return params
+
+    if method == "POST":
+        return _handle_action(path, db)
+
+    if "/data/content" in path:
+        key = qs.get("key", "")
+        if not key:
+            return err("Missing content key")
+        return ok({"content": read_json_from_s3(key)})
+
+    if "/data/orders/lookup" in path:
+        order = get_orders_handler({
+            "order_id": qs.get("order_id", ""),
+            "product_type": qs.get("product_type", ""),
+            "limit": 1,
+        }, None)
+        return ok(order)
 
     if "/data/leads" in path:
         params = with_filters("order=created_at.desc", status)
@@ -90,6 +120,31 @@ def handler(event, context):
         })
 
     return err("Unknown endpoint", 404)
+
+
+def _handle_action(path: str, db):
+    social_match = re.search(r"/data/social-posts/([^/]+)/repost$", path)
+    if social_match:
+        post_id = social_match.group(1)
+        rows = db.select("social_posts", params=f"id=eq.{post_id}&limit=1")
+        if not rows:
+            return err("Social post not found", 404)
+        result = post_to_platforms_handler({"postId": post_id, "post": rows[0]}, None)
+        return ok({"message": "Social post reposted", "result": result})
+
+    blog_match = re.search(r"/data/blog-posts/([^/]+)/republish$", path)
+    if blog_match:
+        blog_id = blog_match.group(1)
+        rows = db.select("blog_posts", params=f"id=eq.{blog_id}&limit=1")
+        if not rows:
+            return err("Blog post not found", 404)
+        blog = rows[0]
+        if blog.get("slug"):
+            blog = {**blog, "slug": f"{blog['slug']}-repost-{blog_id[:8]}"}
+        result = create_github_pr_handler({"blogId": blog_id, "blog": blog}, None)
+        return ok({"message": "Blog PR created again", "result": result})
+
+    return err("Unknown action", 404)
 
 
 def _count_by(rows: list, field: str) -> dict:

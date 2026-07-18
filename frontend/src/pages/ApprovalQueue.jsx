@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { listApprovals, approveItem, rejectItem } from '../services/api'
+import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { listApprovals, approveItem, rejectItem, getGeneratedContent } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, Modal, Spinner } from '../components/ui'
 import { CheckSquare, Check, X, Eye, Mail, Share2, FileText, Code2, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -16,9 +16,27 @@ const WF_META = {
 
 function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
   const [note, setNote] = useState('')
+  const [fullContent, setFullContent] = useState(null)
   const meta = WF_META[item.workflow_type] || { label: item.workflow_type, icon: CheckSquare }
   const Icon = meta.icon
-  const hasStructuredPreview = item.payload?.post || item.payload?.blog
+  const post = fullContent && item.payload?.post ? { ...item.payload.post, ...fullContent } : item.payload?.post
+  const blog = fullContent && item.payload?.blog ? { ...item.payload.blog, ...fullContent } : item.payload?.blog
+  const contentKey = item.payload?.post?.content_s3_key || item.payload?.blog?.content_s3_key
+  const hasStructuredPreview = post || blog
+
+  useEffect(() => {
+    let cancelled = false
+    setFullContent(null)
+    if (!contentKey) return
+    getGeneratedContent(contentKey)
+      .then(res => {
+        if (!cancelled) setFullContent(res.content)
+      })
+      .catch(() => {
+        if (!cancelled) setFullContent(null)
+      })
+    return () => { cancelled = true }
+  }, [contentKey])
 
   return (
     <Modal open title={`Review: ${meta.label}`} onClose={onClose} width="max-w-5xl">
@@ -41,41 +59,41 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
         )}
 
         {/* Post content for social/blog */}
-        {item.payload?.post && (
+        {post && (
           <div className="space-y-3">
-            {item.payload.post.image_url ? (
-              <img src={item.payload.post.image_url} alt="" className="w-full max-h-80 object-contain rounded-xl border border-slate-100 bg-slate-50" />
+            {post.image_url ? (
+              <img src={post.image_url} alt="" className="w-full max-h-80 object-contain rounded-xl border border-slate-100 bg-slate-50" />
             ) : (
               <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 text-center">
                 No image was generated for this post.
               </div>
             )}
-            {['facebook','instagram','linkedin'].map(p => item.payload.post[p] && (
+            {['facebook','instagram','linkedin'].map(p => post[p] && (
               <div key={p} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
                 <div className="text-xs font-semibold text-slate-500 uppercase mb-1 capitalize">{p}</div>
-                <p className="text-sm text-slate-700">{item.payload.post[p]}</p>
+                <p className="text-sm text-slate-700 whitespace-pre-wrap">{post[p]}</p>
               </div>
             ))}
           </div>
         )}
 
         {/* Blog preview */}
-        {item.payload?.blog && (
+        {blog && (
           <div className="space-y-3">
-            {item.payload.blog.image_url ? (
-              <img src={item.payload.blog.image_url} alt="" className="w-full max-h-96 object-contain rounded-xl border border-slate-100 bg-slate-50" />
+            {blog.image_url ? (
+              <img src={blog.image_url} alt="" className="w-full max-h-96 object-contain rounded-xl border border-slate-100 bg-slate-50" />
             ) : (
               <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 text-center">
                 No featured image was generated for this blog post.
               </div>
             )}
             <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
-              <div className="text-base font-semibold text-navy mb-2">{item.payload.blog.title}</div>
-              {item.payload.blog.excerpt && (
-                <p className="text-sm text-slate-500 mb-3">{item.payload.blog.excerpt}</p>
+              <div className="text-base font-semibold text-navy mb-2">{blog.title}</div>
+              {blog.excerpt && (
+                <p className="text-sm text-slate-500 mb-3">{blog.excerpt}</p>
               )}
               <pre className="text-sm text-slate-700 whitespace-pre-wrap overflow-y-auto max-h-[52vh] leading-6 font-sans">
-                {item.payload.blog.content || 'No blog content was generated.'}
+                {blog.content || 'No blog content was generated.'}
               </pre>
             </div>
           </div>

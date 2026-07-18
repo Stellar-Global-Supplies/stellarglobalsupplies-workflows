@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { startWorkflow, getBlogPosts } from '../services/api'
+import { startWorkflow, getBlogPosts, republishBlogPost } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
-import { FileText, Play, ExternalLink, GitPullRequest } from 'lucide-react'
+import { FileText, Play, GitPullRequest, Repeat2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -58,6 +58,16 @@ export default function BlogPost() {
       toast.error(e.message)
     } finally {
       setRunning(false)
+    }
+  }
+
+  async function publishAgain(id) {
+    try {
+      await republishBlogPost(id)
+      toast.success('Blog PR created again.')
+      qc.invalidateQueries(['blog-posts'])
+    } catch (e) {
+      toast.error(e.message)
     }
   }
 
@@ -151,6 +161,9 @@ export default function BlogPost() {
                       )}
                     </div>
                   </div>
+                  <button onClick={() => publishAgain(blog.id)} className="btn-secondary text-xs py-1.5 h-fit">
+                    <Repeat2 size={13} /> Publish Again
+                  </button>
                 </div>
               ))}
             </div>

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from shared.bedrock_client  import generate_json, generate_image
 from shared.supabase_client import get_client
-from shared.utils            import upload_image_to_s3, now_iso, content_hash
+from shared.utils            import image_ext_and_type, upload_image_to_s3, upload_json_to_s3, now_iso, content_hash
 
 SYSTEM = """You are a social media manager for Stellar Global Supplies.
 Write engaging, professional posts that showcase our products and services.
@@ -82,6 +82,18 @@ Return JSON:
 }}"""
 
     content_data = generate_json(gen_prompt, system=SYSTEM, max_tokens=1200)
+    content_key = f"generated-content/social-posts/{post_type}/{uuid.uuid4()}.json"
+    content_url = upload_json_to_s3({
+        "type": post_type,
+        "title": content_data.get("title", ""),
+        "facebook": content_data.get("facebook", ""),
+        "instagram": content_data.get("instagram", ""),
+        "linkedin": content_data.get("linkedin", ""),
+        "image_prompt": content_data.get("image_prompt", ""),
+        "prompt": prompt,
+        "repo_name": repo_name,
+        "order": order,
+    }, content_key)
 
     # ── Generate image (non-blocking) ─────────────────────────
     img_prompt = content_data.get("image_prompt",
@@ -92,8 +104,9 @@ Return JSON:
     try:
         image_bytes = generate_image(img_prompt)
         if image_bytes:
-            img_key = f"social-posts/{post_type}/{uuid.uuid4()}.png"
-            image_url = upload_image_to_s3(image_bytes, img_key)
+            ext, content_type = image_ext_and_type(image_bytes)
+            img_key = f"social-posts/{post_type}/{uuid.uuid4()}{ext}"
+            image_url = upload_image_to_s3(image_bytes, img_key, content_type=content_type)
         else:
             print("[generate_post] generate_image returned None — saving without image")
     except Exception as e:
@@ -101,10 +114,13 @@ Return JSON:
 
     # ── Save to Supabase ──────────────────────────────────────
     db  = get_client()
+    workflow_run_id = event.get("workflowRunId")
     row = {
         "type":            post_type,
         "title":           content_data.get("title", ""),
-        "content":         content_data.get("facebook", ""),
+        "content":         content_data.get("facebook", "")[:500],
+        "content_s3_key":  content_key,
+        "content_url":     content_url,
         "image_url":       image_url,
         "image_s3_key":    img_key,
         "platforms":       {"facebook": True, "instagram": True, "linkedin": True},
@@ -113,10 +129,11 @@ Return JSON:
         "order_uuid":      order_uuid or None if post_type == "product" else None,
         "repo_name":       repo_name if post_type == "tech" else None,
         "prompt":          prompt,
-        "workflow_run_id": event.get("workflowRunId"),
+        "workflow_run_id": workflow_run_id,
+        "social_workflow_id": workflow_run_id,
     }
     row = {k: v for k, v in row.items() if v is not None}
-    optional_columns = ["order_uuid", "workflow_run_id"]
+    optional_columns = ["content_s3_key", "content_url", "order_uuid", "workflow_run_id", "social_workflow_id"]
     insert_row = row.copy()
     while True:
         try:
@@ -132,5 +149,13 @@ Return JSON:
         **event,
         "isDuplicate": False,
         "postId":      saved["id"],
-        "post":        {**saved, **content_data, "image_url": image_url, "hasImage": image_url is not None},
+        "post":        {
+            **saved,
+            "title": content_data.get("title", ""),
+            "content": content_data.get("facebook", "")[:500],
+            "content_s3_key": content_key,
+            "content_url": content_url,
+            "image_url": image_url,
+            "hasImage": image_url is not None,
+        },
     }

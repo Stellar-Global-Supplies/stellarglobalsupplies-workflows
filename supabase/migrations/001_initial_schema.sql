@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS social_posts (
   title           TEXT,
   content         TEXT NOT NULL,
   content_hash    TEXT GENERATED ALWAYS AS (md5(content)) STORED,
+  content_s3_key  TEXT,
+  content_url     TEXT,
   image_url       TEXT,
   image_s3_key    TEXT,
   platforms       JSONB NOT NULL DEFAULT '{"facebook":false,"instagram":false,"linkedin":false}',
@@ -71,6 +73,10 @@ ALTER TABLE social_posts
   ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE social_posts
   ADD COLUMN IF NOT EXISTS content TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS content_s3_key TEXT;
+ALTER TABLE social_posts
+  ADD COLUMN IF NOT EXISTS content_url TEXT;
 ALTER TABLE social_posts
   ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE social_posts
@@ -113,6 +119,8 @@ CREATE TABLE IF NOT EXISTS blog_posts (
   slug            TEXT UNIQUE NOT NULL,
   excerpt         TEXT,
   content         TEXT NOT NULL,
+  content_s3_key  TEXT,
+  content_url     TEXT,
   image_url       TEXT,
   image_s3_key    TEXT,
   tags            JSONB DEFAULT '[]',

@@ -40,3 +40,8 @@ export const getLeads        = (qs='')  => apiRequest('GET', `/data/leads?${qs}`
 export const getSocialPosts  = (qs='')  => apiRequest('GET', `/data/social-posts?${qs}`)
 export const getBlogPosts    = (qs='')  => apiRequest('GET', `/data/blog-posts?${qs}`)
 export const getWorkflowRuns = (qs='')  => apiRequest('GET', `/data/workflow-runs?${qs}`)
+export const getGeneratedContent = (key) => apiRequest('GET', `/data/content?key=${encodeURIComponent(key)}`)
+export const lookupOrder = (orderId = '', productType = '') =>
+  apiRequest('GET', `/data/orders/lookup?order_id=${encodeURIComponent(orderId)}&product_type=${encodeURIComponent(productType)}`)
+export const repostSocialPost = (id)    => apiRequest('POST', `/data/social-posts/${id}/repost`, {})
+export const republishBlogPost = (id)   => apiRequest('POST', `/data/blog-posts/${id}/republish`, {})

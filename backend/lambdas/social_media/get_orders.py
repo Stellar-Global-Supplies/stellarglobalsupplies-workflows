@@ -8,10 +8,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from shared.supabase_client import get_client
 
+ID_FIELDS = ("id", "tracking_token")
+PRODUCT_FIELDS = ("material", "product_type")
+CATEGORY_FIELDS = ("product_type",)
+
 
 def _looks_like_uuid(value: str) -> bool:
     parts = value.split("-")
     return len(value) == 36 and len(parts) == 5
+
+
+def _field(row: dict, fields: tuple[str, ...], default: str = "") -> str:
+    return str(next((row.get(field) for field in fields if row.get(field)), default))
+
+
+def _matches_lookup(row: dict, lookup: str) -> bool:
+    needle = lookup.lower()
+    for field in ID_FIELDS:
+        value = str(row.get(field, "")).lower()
+        if value == needle or value.startswith(needle):
+            return True
+    return False
 
 
 def handler(event, context):
@@ -33,20 +50,24 @@ def handler(event, context):
             # Support short display IDs / UUID prefixes from the UI by scanning recent rows locally,
             # so we do not need schema changes in the production order-management table.
             recent = db.select("orders", params="select=*&order=created_at.desc&limit=100")
-            rows = [
-                r for r in recent
-                if str(r.get("id", "")).startswith(order_id_str)
-                or str(r.get("order_id", "")).lower() == order_id_str.lower()
-                or str(r.get("order_display_id", "")).lower() == order_id_str.lower()
-            ]
+            rows = [r for r in recent if _matches_lookup(r, order_id_str)]
     else:
         limit        = event.get("limit", 1)
         product_type = event.get("product_type", "")
         params = f"select=*&order=created_at.desc&limit={limit}"
         if product_type:
             import urllib.parse
-            params += f"&product_category=ilike.{urllib.parse.quote(f'%{product_type}%')}"
-        rows = db.select("orders", params=params)
+            params += f"&product_type=ilike.{urllib.parse.quote(f'%{product_type}%')}"
+        try:
+            rows = db.select("orders", params=params)
+        except Exception as exc:
+            if "product_category" not in str(exc):
+                raise
+            rows = db.select("orders", params=f"select=*&order=created_at.desc&limit={max(limit, 25)}")
+            if product_type:
+                needle = product_type.lower()
+                rows = [r for r in rows if any(needle in str(r.get(field, "")).lower() for field in CATEGORY_FIELDS)]
+            rows = rows[:limit]
 
     if not rows:
         # Return mock data for demo if no orders table or no orders yet
@@ -62,16 +83,23 @@ def handler(event, context):
 
     order = rows[0]
     order_uuid = str(order.get("id") or "") if _looks_like_uuid(str(order.get("id") or "")) else ""
-    order_display_id = str(
-        order.get("order_display_id")
-        or order.get("order_id")
-        or order.get("id")
-        or ""
-    )
+    order_display_id = _field(order, ID_FIELDS)
     order_key = order_uuid or order_display_id
+    normalized_order = {
+        **order,
+        "product_name": _field(order, PRODUCT_FIELDS, event.get("product_name", "")),
+        "product_category": _field(order, CATEGORY_FIELDS, event.get("product_type", "")),
+        "customer_segment": str(order.get("customer_name") or ""),
+        "description": (
+            f"{order.get('quantity')} {order.get('unit')} of {order.get('material')} "
+            f"({order.get('product_type')}) for {order.get('customer_name')}. "
+            f"Order status: {order.get('status')}; payment: {order.get('payment_status')}; "
+            f"sale cost: {order.get('sale_cost')}."
+        ),
+    }
     return {
         **event,
-        "order": order,
+        "order": normalized_order,
         "orderId": order_key,
         "orderKey": order_key,
         "orderUuid": order_uuid,

@@ -12,7 +12,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 from shared.supabase_client import get_client
-from shared.utils import get_ssm, now_iso
+from shared.utils import get_ssm, now_iso, read_json_from_s3
 
 GITHUB_API = "https://api.github.com"
 
@@ -41,6 +41,8 @@ def gh_request(method: str, path: str, token: str, body=None) -> dict:
 def handler(event, context):
     blog   = event["blog"]
     blog_id = event["blogId"]
+    if blog.get("content_s3_key"):
+        blog = {**blog, **read_json_from_s3(blog["content_s3_key"])}
 
     token      = get_ssm(os.environ["GITHUB_TOKEN_PARAM"])
     repo_owner = os.environ["WEBSITE_REPO_OWNER"]
