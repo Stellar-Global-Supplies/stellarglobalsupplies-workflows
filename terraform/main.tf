@@ -375,12 +375,12 @@ resource "aws_iam_role_policy" "events_sfn_policy" {
 # ─────────────────────────────────────────────
 locals {
   lambda_env = {
-    SUPABASE_URL              = var.supabase_url
-    SUPABASE_SERVICE_KEY      = var.supabase_service_key
-    ASSETS_BUCKET             = aws_s3_bucket.assets.bucket
-    ASSETS_CLOUDFRONT_URL     = "https://${aws_cloudfront_distribution.assets.domain_name}"
-    CONTEXT_BUCKET            = var.context_bucket
-    BEDROCK_TEXT_MODEL        = "amazon.nova-pro-v1:0"
+    SUPABASE_URL          = var.supabase_url
+    SUPABASE_SERVICE_KEY  = var.supabase_service_key
+    ASSETS_BUCKET         = aws_s3_bucket.assets.bucket
+    ASSETS_CLOUDFRONT_URL = "https://${aws_cloudfront_distribution.assets.domain_name}"
+    CONTEXT_BUCKET        = var.context_bucket
+    BEDROCK_TEXT_MODEL    = "amazon.nova-pro-v1:0"
     # BEDROCK_IMAGE_MODEL       = "amazon.nova-canvas-v1:0"
     # BEDROCK_IMAGE_MODEL_FALLBACK = "amazon.titan-image-generator-v2:0"
     SENDER_EMAIL              = var.sender_email
@@ -401,23 +401,23 @@ locals {
   }
 
   lambdas = {
-    generate-leads    = { handler = "lead_generation.generate_leads.handler", source = "../backend/lambdas" }
+    generate-leads      = { handler = "lead_generation.generate_leads.handler", source = "../backend/lambdas" }
     load-lead-for-email = { handler = "lead_generation.load_lead_for_email.handler", source = "../backend/lambdas" }
-    check-duplicate   = { handler = "lead_generation.check_duplicate.handler", source = "../backend/lambdas" }
-    save-lead         = { handler = "lead_generation.save_lead.handler", source = "../backend/lambdas" }
-    draft-email       = { handler = "lead_generation.draft_email.handler", source = "../backend/lambdas" }
-    create-approval   = { handler = "lead_generation.create_approval.handler", source = "../backend/lambdas" }
-    send-email        = { handler = "lead_generation.send_email.handler", source = "../backend/lambdas" }
-    schedule-followup = { handler = "lead_generation.schedule_followup.handler", source = "../backend/lambdas" }
-    get-orders        = { handler = "social_media.get_orders.handler", source = "../backend/lambdas" }
-    generate-post     = { handler = "social_media.generate_post.handler", source = "../backend/lambdas" }
-    post-to-platforms = { handler = "social_media.post_to_platforms.handler", source = "../backend/lambdas" }
-    read-s3-context   = { handler = "tech_post.read_s3_context.handler", source = "../backend/lambdas" }
-    generate-blog     = { handler = "blog_post.generate_blog.handler", source = "../backend/lambdas" }
-    create-github-pr  = { handler = "blog_post.create_github_pr.handler", source = "../backend/lambdas" }
-    workflow-trigger  = { handler = "api.workflow_trigger.handler", source = "../backend/lambdas" }
-    approval-handler  = { handler = "api.approval_handler.handler", source = "../backend/lambdas" }
-    data-handler      = { handler = "api.data_handler.handler", source = "../backend/lambdas" }
+    check-duplicate     = { handler = "lead_generation.check_duplicate.handler", source = "../backend/lambdas" }
+    save-lead           = { handler = "lead_generation.save_lead.handler", source = "../backend/lambdas" }
+    draft-email         = { handler = "lead_generation.draft_email.handler", source = "../backend/lambdas" }
+    create-approval     = { handler = "lead_generation.create_approval.handler", source = "../backend/lambdas" }
+    send-email          = { handler = "lead_generation.send_email.handler", source = "../backend/lambdas" }
+    schedule-followup   = { handler = "lead_generation.schedule_followup.handler", source = "../backend/lambdas" }
+    get-orders          = { handler = "social_media.get_orders.handler", source = "../backend/lambdas" }
+    generate-post       = { handler = "social_media.generate_post.handler", source = "../backend/lambdas" }
+    post-to-platforms   = { handler = "social_media.post_to_platforms.handler", source = "../backend/lambdas" }
+    read-s3-context     = { handler = "tech_post.read_s3_context.handler", source = "../backend/lambdas" }
+    generate-blog       = { handler = "blog_post.generate_blog.handler", source = "../backend/lambdas" }
+    create-github-pr    = { handler = "blog_post.create_github_pr.handler", source = "../backend/lambdas" }
+    workflow-trigger    = { handler = "api.workflow_trigger.handler", source = "../backend/lambdas" }
+    approval-handler    = { handler = "api.approval_handler.handler", source = "../backend/lambdas" }
+    data-handler        = { handler = "api.data_handler.handler", source = "../backend/lambdas" }
   }
 }
 
