@@ -3,7 +3,7 @@
 
 # ── AWS (OIDC recommended — no static keys) ────────────────────
 AWS_REGION                  = us-east-1
-AWS_DEPLOY_ROLE_ARN         = arn:aws:iam::ACCOUNT:role/github-actions-deploy
+AWS_ROLE_ARN                = arn:aws:iam::ACCOUNT:role/github-actions-deploy
 
 # ── Supabase ────────────────────────────────────────────────────
 SUPABASE_URL                = https://YOUR_PROJECT.supabase.co
