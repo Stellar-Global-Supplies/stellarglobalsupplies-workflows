@@ -4,6 +4,11 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional
 
+# Hard timeout for every Supabase HTTP call.
+# Without this, urlopen blocks indefinitely when Supabase is slow/unreachable,
+# causing Lambda to hang until the function-level timeout kills the execution.
+_HTTP_TIMEOUT = 30  # seconds
+
 
 class SupabaseClient:
     """Lightweight Supabase REST client for Lambda (no external deps beyond stdlib)."""
@@ -25,7 +30,7 @@ class SupabaseClient:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(full_url, data=data, headers=self.headers, method=method)
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else []
         except urllib.error.HTTPError as e:
