@@ -70,9 +70,12 @@ put_param "/${PROJECT}/instagram/access_token" "$IG_TOKEN"
 GH_TOKEN="$(get_value TOKEN_PAT "GitHub PAT (repo write access): ")"
 put_param "/${PROJECT}/github/token" "$GH_TOKEN"
 
-# ── Hunter.io ────────────────────────────────────
-HUNTER_KEY="$(get_value HUNTER_API_KEY "Hunter.io API Key: ")"
-put_param "/${PROJECT}/hunter/api_key" "$HUNTER_KEY"
+# ── Hunter.io (optional) ─────────────────────────
+if [ -n "${HUNTER_API_KEY:-}" ]; then
+  put_param "/${PROJECT}/hunter/api_key" "$HUNTER_API_KEY"
+else
+  echo "⚠️  HUNTER_API_KEY not set, skipping Hunter.io SSM parameter"
+fi
 
 echo ""
 echo "=== All secrets stored. Lambda env var HUNTER_API_KEY_PARAM=/${PROJECT}/hunter/api_key ==="
