@@ -5,7 +5,7 @@ import os
 import hashlib
 import urllib.parse
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 
 def response(status: int, body: Any) -> Dict:
@@ -43,6 +43,18 @@ def content_hash(text: str) -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def image_ext_and_type(data: bytes) -> Tuple[str, str]:
+    """
+    Detect image format from bytes header.
+    Returns (extension, content_type).
+    SVG placeholder from bedrock_client starts with b'<svg'.
+    """
+    head = data[:10].lstrip()
+    if head.startswith(b"<svg") or head.startswith(b"<SVG"):
+        return ".svg", "image/svg+xml"
+    return ".png", "image/png"
 
 
 def upload_image_to_s3(image_bytes: bytes, key: str, content_type: str = "image/png") -> str:

@@ -1,15 +1,15 @@
 """
 Lambda: generate_blog
-Generates a full blog post with title, content, and image using Amazon Nova.
+Generates a full blog post + image using Amazon Nova.
+Image is non-blocking — blog saves without image if all options fail.
 """
-import sys, os
+import sys, os, uuid
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import uuid
-from shared.bedrock_client import generate_json, generate_image
+from shared.bedrock_client  import generate_json, generate_image
 from shared.supabase_client import get_client
-from shared.utils import slugify, upload_image_to_s3, now_iso
+from shared.utils            import slugify, upload_image_to_s3, now_iso
 
 SYSTEM = """You are a professional content writer for Stellar Global Supplies, a global B2B supplier.
 Write informative, SEO-optimized blog posts that provide genuine value to procurement professionals,
@@ -17,12 +17,12 @@ supply chain managers, and business owners. Use clear headings, practical advice
 
 
 def handler(event, context):
-    topic        = event.get("topic", "")
-    keywords     = event.get("keywords", [])
-    word_count   = event.get("word_count", 800)
+    topic         = event.get("topic", "")
+    keywords      = event.get("keywords", [])
+    word_count    = event.get("word_count", 800)
     custom_prompt = event.get("custom_prompt", "")
 
-    # Generate blog content
+    # ── Generate blog content ─────────────────────────────────
     prompt = f"""
 Write a comprehensive blog post for Stellar Global Supplies website.
 
@@ -42,16 +42,26 @@ Return valid JSON:
 """
     blog_data = generate_json(prompt, system=SYSTEM, max_tokens=3000)
 
-    # Generate featured image
-    img_prompt  = blog_data.get("image_prompt", f"Professional blog image about {topic} for B2B supply company")
-    image_bytes = generate_image(img_prompt, width=1200, height=630)
-    img_key     = f"blog-images/{uuid.uuid4()}.png"
-    image_url   = upload_image_to_s3(image_bytes, img_key)
+    # ── Generate image (non-blocking) ─────────────────────────
+    img_prompt  = blog_data.get("image_prompt",
+                                f"Professional blog image about {topic} for B2B supply company")
+    image_url   = None
+    img_key     = None
+
+    try:
+        image_bytes = generate_image(img_prompt, width=1024, height=1024)
+        if image_bytes:
+            base_key           = f"blog-images/{uuid.uuid4()}"
+            img_key, image_url = upload_image_to_s3(image_bytes, base_key)
+        else:
+            print("[generate_blog] generate_image returned None — saving without image")
+    except Exception as e:
+        print(f"[generate_blog] image step failed ({e}) — saving without image")
 
     title = blog_data.get("title", topic)
     slug  = slugify(title) + f"-{uuid.uuid4().hex[:6]}"
 
-    # Save draft to Supabase
+    # ── Save draft to Supabase ────────────────────────────────
     db  = get_client()
     row = {
         "title":           title,
@@ -68,6 +78,6 @@ Return valid JSON:
 
     return {
         **event,
-        "blogId":  saved["id"],
-        "blog":    {**saved, "image_url": image_url},
+        "blogId": saved["id"],
+        "blog":   {**saved, "image_url": image_url, "hasImage": image_url is not None},
     }

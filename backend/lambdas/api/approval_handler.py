@@ -26,11 +26,20 @@ def _approval_id_from_event(event):
     return match.group(1) if match else None
 
 
+def _http_method_from_event(event):
+    return (
+        event.get("httpMethod")
+        or (event.get("requestContext") or {}).get("http", {}).get("method")
+        or event.get("method")
+        or "GET"
+    )
+
+
 def handler(event, context):
     if event.get("httpMethod") == "OPTIONS":
         return ok({})
 
-    method      = event.get("httpMethod", "GET")
+    method      = _http_method_from_event(event).upper()
     path        = event.get("path") or event.get("rawPath", "")
     approval_id  = _approval_id_from_event(event)
 
