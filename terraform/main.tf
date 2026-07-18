@@ -11,9 +11,11 @@ terraform {
     }
   }
   backend "s3" {
-    bucket = "stellar-tf-state"
-    key    = "workflows-platform/terraform.tfstate"
-    region = "us-east-1"
+    bucket         = "stellarglobalsupplies-backend-config"
+    key            = "stellar-global-workflow/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "stellarglobalsupplies-backend-db-config"
   }
 }
 
