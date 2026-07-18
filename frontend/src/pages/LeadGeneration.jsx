@@ -28,8 +28,8 @@ export default function LeadGeneration() {
     try {
       const res = await startWorkflow('lead-generation', form)
       toast.success(`Workflow started — run ID: ${res.workflowRunId?.slice(0,8)}`)
-      qc.invalidateQueries(['leads'])
-      qc.invalidateQueries(['dashboard'])
+      qc.invalidateQueries({ queryKey: ['leads'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
       setTab('leads')
     } catch (e) {
       toast.error(e.message)
@@ -43,7 +43,7 @@ export default function LeadGeneration() {
     try {
       const res = await startWorkflow('lead-email-existing', { leadId: lead.id })
       toast.success(`Email draft workflow started — run ID: ${res.workflowRunId?.slice(0,8)}`)
-      qc.invalidateQueries(['dashboard'])
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
     } catch (e) {
       toast.error(e.message)
     } finally {

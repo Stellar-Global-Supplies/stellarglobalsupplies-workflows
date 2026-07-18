@@ -117,7 +117,7 @@ def _sync_workflow_runs(db):
 
         update = {
             "status": "succeeded" if status == "SUCCEEDED" else "failed" if status == "FAILED" else "stopped" if status == "ABORTED" else "timed_out",
-            "completed_at": resp.get("stopDate") or run.get("completed_at"),
+            "completed_at": _to_iso(resp.get("stopDate") or run.get("completed_at")),
         }
 
         if status == "SUCCEEDED" and resp.get("output"):
@@ -129,3 +129,9 @@ def _sync_workflow_runs(db):
             update["error_msg"] = resp.get("cause") or resp.get("error") or status
 
         db.update("workflow_runs", update, params=f"id=eq.{run['id']}")
+
+
+def _to_iso(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value

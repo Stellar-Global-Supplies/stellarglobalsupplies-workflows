@@ -161,7 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_approval_queue_workflow_run_id ON approval_queue(
 CREATE TABLE IF NOT EXISTS workflow_runs (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workflow_type TEXT NOT NULL
-                CHECK (workflow_type IN ('lead_generation','social_product','social_tech','blog')),
+                CHECK (workflow_type IN ('lead_generation','lead_email_existing','social_product','social_tech','blog')),
   execution_arn TEXT,
   status        TEXT NOT NULL DEFAULT 'running'
                 CHECK (status IN ('running','succeeded','failed','stopped','timed_out')),
@@ -171,6 +171,11 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   completed_at  TIMESTAMPTZ
 );
+ALTER TABLE workflow_runs
+  DROP CONSTRAINT IF EXISTS workflow_runs_workflow_type_check;
+ALTER TABLE workflow_runs
+  ADD CONSTRAINT workflow_runs_workflow_type_check
+  CHECK (workflow_type IN ('lead_generation','lead_email_existing','social_product','social_tech','blog'));
 CREATE INDEX idx_workflow_runs_type   ON workflow_runs(workflow_type);
 CREATE INDEX idx_workflow_runs_status ON workflow_runs(status);
 
