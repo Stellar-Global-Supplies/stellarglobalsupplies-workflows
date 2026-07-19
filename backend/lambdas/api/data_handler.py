@@ -136,6 +136,44 @@ def _handle_action(path: str, db):
         result = post_to_platforms_handler({"postId": post_id, "post": rows[0]}, None)
         return ok({"message": "Social post reposted", "result": result})
 
+    # POST /data/social-posts/{id}/publish → creates Gate 2 approval entry
+    publish_match = re.search(r"/data/social-posts/([^/]+)/publish$", path)
+    if publish_match:
+        import uuid as _uuid
+        post_id = publish_match.group(1)
+        rows = db.select("social_posts", params=f"id=eq.{post_id}&limit=1")
+        if not rows:
+            return err("Social post not found", 404)
+        post = rows[0]
+        if post["status"] != "approved_manual":
+            return err(f"Post must be in 'approved_manual' status to publish. Current: '{post['status']}'", 400)
+        platforms    = post.get("platforms") or {}
+        active       = [p for p, v in platforms.items() if v]
+        platform_str = ", ".join(active) if active else post.get("platform", "")
+        row = {
+            "workflow_type": f"social_{post.get('type','product')}",
+            "reference_id":  post_id,
+            "task_token":    f"direct-publish-{_uuid.uuid4()}",
+            "payload": {
+                "post":         post,
+                "postId":       post_id,
+                "approvalGate": "publish",
+            },
+            "preview_html": f"""
+<div style="font-family:Arial,sans-serif;max-width:600px">
+  <h2>Publish Approval</h2>
+  <p><strong>Title:</strong> {post.get('title','')}</p>
+  <p><strong>Type:</strong> {post.get('type','')}</p>
+  <p><strong>Platforms:</strong> {platform_str}</p>
+  {"<img src='" + post.get('image_url','') + "' style='max-width:100%;margin:8px 0'/>" if post.get('image_url') else ''}
+  <p style="white-space:pre-wrap">{(post.get('caption') or post.get('content',''))[:500]}</p>
+</div>""",
+            "status": "pending",
+        }
+        saved = db.insert("approval_queue", row)
+        db.update("social_posts", {"status": "publishing"}, params=f"id=eq.{post_id}")
+        return ok({"message": "Publish approval queued", "approvalId": saved["id"]})
+
     blog_match = re.search(r"/data/blog-posts/([^/]+)/republish$", path)
     if blog_match:
         blog_id = blog_match.group(1)

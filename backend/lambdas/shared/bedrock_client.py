@@ -4,9 +4,9 @@ Bedrock client — Nova Pro for text, Stability AI via Bedrock for images.
 Model Access page was retired — all Bedrock models are now auto-enabled.
 
 Image fallback order:
-  1. stability.sd3-5-large-v1:0    — best quality, ~$0.065/image  (us-west-2)
-  2. stability.stable-image-core-v1:0 — good quality, ~$0.003/image (us-west-2)
-  3. Branded SVG placeholder       — zero cost, always works
+  1. stability.sd3-5-large-v1:0       — best quality, ~$0.065/image  (us-west-2)
+  2. stability.stable-image-core-v1:0 — good quality, ~$0.003/image  (us-west-2)
+  3. Branded SVG placeholder          — zero cost, always works
 
 All Stability models live in us-west-2. Text (Nova Pro) stays in us-east-1.
 """
@@ -16,8 +16,8 @@ import base64
 import os
 from typing import Optional
 
-_bedrock_text   = None   # us-east-1 — Nova Pro
-_bedrock_image  = None   # us-west-2 — Stability AI
+_bedrock_text  = None   # us-east-1 — Nova Pro
+_bedrock_image = None   # us-west-2 — Stability AI
 
 
 def _get_text_client():
@@ -33,7 +33,6 @@ def _get_text_client():
 def _get_image_client():
     global _bedrock_image
     if _bedrock_image is None:
-        # Stability models are hosted in us-west-2 regardless of primary region
         _bedrock_image = boto3.client(
             "bedrock-runtime",
             region_name="us-west-2",
@@ -75,13 +74,6 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
 
 
 # ─── IMAGE — Stability AI via Bedrock (us-west-2) ────────────────────────────
-# Model Access page retired — models auto-enabled, no manual approval needed.
-# All three models share the same request/response format.
-#
-# Pricing (on-demand):
-#   sd3-5-large      $0.065/image  — best quality, 8B params, photorealistic
-#   stable-image-core $0.003/image  — fast, great for social posts
-
 _STABILITY_MODELS = [
     "stability.sd3-5-large-v1:0",        # best quality
     "stability.stable-image-core-v1:0",  # cheapest fallback
@@ -103,8 +95,7 @@ def _invoke_stability(model_id: str, prompt: str) -> bytes:
         contentType="application/json",
         accept="application/json",
     )
-    result = json.loads(resp["body"].read())
-    # Both models return {"images": ["<base64>"], ...}
+    result    = json.loads(resp["body"].read())
     img_bytes = base64.b64decode(result["images"][0])
     if len(img_bytes) < 1000:
         raise ValueError(f"Image too small: {len(img_bytes)} bytes")
@@ -147,10 +138,9 @@ def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024)
 
 def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Optional[bytes]:
     """
-    Returns image bytes (PNG or SVG).
+    Returns image bytes (PNG or SVG). Billed through AWS — no external API keys needed.
     Tries Stability AI models via Bedrock (us-west-2) best → cheapest,
     falls back to branded SVG if all fail.
-    No API keys needed — billed through AWS.
     """
     for model_id in _STABILITY_MODELS:
         try:

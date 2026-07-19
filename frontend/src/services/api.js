@@ -28,8 +28,8 @@ export const listApprovals = (status = 'pending', workflowType = '') => {
   return apiRequest('GET', `/approvals?${qs}`)
 }
 
-export const approveItem = (id, note = '') =>
-  apiRequest('POST', `/approvals/${id}/approve`, { note })
+export const approveItem = (id, note = '', edits = {}) =>
+  apiRequest('POST', `/approvals/${id}/approve`, { note, edits })
 
 export const rejectItem = (id, note = '') =>
   apiRequest('POST', `/approvals/${id}/reject`, { note })
@@ -43,8 +43,9 @@ export const getWorkflowRuns = (qs='')  => apiRequest('GET', `/data/workflow-run
 export const getGeneratedContent = (key) => apiRequest('GET', `/data/content?key=${encodeURIComponent(key)}`)
 export const lookupOrder = (orderId = '', productType = '') =>
   apiRequest('GET', `/data/orders/lookup?order_id=${encodeURIComponent(orderId)}&product_type=${encodeURIComponent(productType)}`)
-export const repostSocialPost = (id)    => apiRequest('POST', `/data/social-posts/${id}/repost`, {})
-export const republishBlogPost = (id)   => apiRequest('POST', `/data/blog-posts/${id}/republish`, {})
+export const repostSocialPost  = (id) => apiRequest('POST', `/data/social-posts/${id}/repost`, {})
+export const publishSocialPost = (id) => apiRequest('POST', `/data/social-posts/${id}/publish`, {})
+export const republishBlogPost = (id) => apiRequest('POST', `/data/blog-posts/${id}/republish`, {})
 
 // ── Schedules ──────────────────────────────────────────────
 export const getSchedules        = (qs = '') => apiRequest('GET',    `/schedules?${qs}`)

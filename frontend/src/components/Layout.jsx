@@ -5,19 +5,20 @@ import { useQuery } from '@tanstack/react-query'
 import { listApprovals } from '../services/api'
 import {
   LayoutDashboard, Users, Share2, Code2, FileText,
-  CheckSquare, History, LogOut, Menu, X, Bell, Activity, CalendarClock
+  CheckSquare, History, LogOut, Menu, X, Bell, Activity, CalendarClock, Layers
 } from 'lucide-react'
 
 const NAV = [
-  { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/leads',    icon: Users,           label: 'Lead Generation' },
-  { to: '/social',   icon: Share2,          label: 'Product Posts' },
-  { to: '/tech',     icon: Code2,           label: 'Tech Showcase' },
-  { to: '/blog',     icon: FileText,        label: 'Blog Posts' },
-  { to: '/approvals',icon: CheckSquare,     label: 'Approvals',  badge: true },
-  { to: '/workflow-runs', icon: Activity,       label: 'Workflow Runs' },
-  { to: '/schedules',    icon: CalendarClock,  label: 'Schedules' },
-  { to: '/history',      icon: History,        label: 'History' },
+  { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/leads',     icon: Users,           label: 'Lead Generation' },
+  { to: '/social',    icon: Share2,          label: 'Product Posts' },
+  { to: '/tech',      icon: Code2,           label: 'Tech Showcase' },
+  { to: '/blog',      icon: FileText,        label: 'Blog Posts' },
+  { to: '/content',   icon: Layers,          label: 'Content' },
+  { to: '/approvals', icon: CheckSquare,     label: 'Approvals', badge: true },
+  { to: '/workflow-runs', icon: Activity,    label: 'Workflow Runs' },
+  { to: '/schedules', icon: CalendarClock,   label: 'Schedules' },
+  { to: '/history',   icon: History,         label: 'History' },
 ]
 
 export default function Layout() {

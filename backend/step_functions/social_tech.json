@@ -1,5 +1,5 @@
 {
-  "Comment": "Tech Post Workflow - Read S3 context, generate post, approve, post to platforms",
+  "Comment": "Tech Post Workflow — Read S3 context, generate post, queue for save-approval. Publishing triggered separately from Content page.",
   "StartAt": "ReadS3Context",
   "States": {
     "ReadS3Context": {
@@ -25,9 +25,9 @@
       "ResultPath": "$",
       "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
       "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
-      "Next": "WaitForTechPostApproval"
+      "Next": "WaitForSaveApproval"
     },
-    "WaitForTechPostApproval": {
+    "WaitForSaveApproval": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "Parameters": {
@@ -35,6 +35,7 @@
         "Payload": {
           "taskToken.$": "$$.Task.Token",
           "workflowType": "social_tech",
+          "approvalGate": "save",
           "data.$": "$"
         }
       },
@@ -43,19 +44,13 @@
       "HeartbeatSeconds": 86400,
       "Catch": [
         {"ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"], "Next": "ApprovalExpired", "ResultPath": "$.error"},
-        {"ErrorEquals": ["Rejected"], "Next": "PostRejected", "ResultPath": "$.error"}
+        {"ErrorEquals": ["Rejected"], "Next": "PostDiscarded", "ResultPath": "$.error"}
       ],
-      "Next": "PostToPlatforms"
+      "Next": "SaveApproved"
     },
-    "PostToPlatforms": {
-      "Type": "Task",
-      "Resource": "${PostToPlatformsArn}",
-      "ResultPath": "$",
-      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 10, "MaxAttempts": 2}],
-      "End": true
-    },
-    "PostRejected":    {"Type": "Succeed"},
-    "ApprovalExpired": {"Type": "Succeed"},
-    "WorkflowFailed":  {"Type": "Fail", "Error": "WorkflowError"}
+    "SaveApproved":   {"Type": "Succeed"},
+    "PostDiscarded":  {"Type": "Succeed"},
+    "ApprovalExpired":{"Type": "Succeed"},
+    "WorkflowFailed": {"Type": "Fail", "Error": "WorkflowError"}
   }
 }

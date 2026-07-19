@@ -8,6 +8,7 @@ import SocialPost  from './pages/SocialMediaPost'
 import TechPost    from './pages/TechPost'
 import BlogPost    from './pages/BlogPost'
 import Approvals   from './pages/ApprovalQueue'
+import Content     from './pages/Content'
 import WorkflowRuns from './pages/WorkflowRuns'
 import History     from './pages/History'
 import Schedules   from './pages/Schedules'
@@ -37,7 +38,8 @@ export default function App() {
             <Route path="social"   element={<SocialPost />} />
             <Route path="tech"     element={<TechPost />} />
             <Route path="blog"     element={<BlogPost />} />
-            <Route path="approvals" element={<Approvals />} />
+            <Route path="approvals"     element={<Approvals />} />
+            <Route path="content"       element={<Content />} />
             <Route path="workflow-runs" element={<WorkflowRuns />} />
             <Route path="history"   element={<History />} />
             <Route path="schedules" element={<Schedules />} />

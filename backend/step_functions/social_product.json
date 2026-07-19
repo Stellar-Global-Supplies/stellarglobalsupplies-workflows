@@ -1,5 +1,5 @@
 {
-  "Comment": "Social Media Product Post Workflow - Get orders, generate image+content, approve, post",
+  "Comment": "Social Product Post Workflow — Get orders, generate post, queue for save-approval. Publishing triggered separately from Content page.",
   "StartAt": "GetOrders",
   "States": {
     "GetOrders": {
@@ -21,18 +21,12 @@
     "IsPostDuplicate": {
       "Type": "Choice",
       "Choices": [
-        {
-          "Variable": "$.isDuplicate",
-          "BooleanEquals": true,
-          "Next": "DuplicatePost"
-        }
+        {"Variable": "$.isDuplicate", "BooleanEquals": true, "Next": "DuplicatePost"}
       ],
-      "Default": "WaitForPostApproval"
+      "Default": "WaitForSaveApproval"
     },
-    "DuplicatePost": {
-      "Type": "Succeed"
-    },
-    "WaitForPostApproval": {
+    "DuplicatePost": {"Type": "Succeed"},
+    "WaitForSaveApproval": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "Parameters": {
@@ -40,6 +34,7 @@
         "Payload": {
           "taskToken.$": "$$.Task.Token",
           "workflowType": "social_product",
+          "approvalGate": "save",
           "data.$": "$"
         }
       },
@@ -48,20 +43,13 @@
       "HeartbeatSeconds": 86400,
       "Catch": [
         {"ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"], "Next": "ApprovalExpired", "ResultPath": "$.error"},
-        {"ErrorEquals": ["Rejected"], "Next": "PostRejected", "ResultPath": "$.error"}
+        {"ErrorEquals": ["Rejected"], "Next": "PostDiscarded", "ResultPath": "$.error"}
       ],
-      "Next": "PostToPlatforms"
+      "Next": "SaveApproved"
     },
-    "PostToPlatforms": {
-      "Type": "Task",
-      "Resource": "${PostToPlatformsArn}",
-      "ResultPath": "$",
-      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 10, "MaxAttempts": 2}],
-      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
-      "End": true
-    },
-    "PostRejected":    {"Type": "Succeed"},
-    "ApprovalExpired": {"Type": "Succeed"},
-    "WorkflowFailed":  {"Type": "Fail", "Error": "WorkflowError"}
+    "SaveApproved":   {"Type": "Succeed"},
+    "PostDiscarded":  {"Type": "Succeed"},
+    "ApprovalExpired":{"Type": "Succeed"},
+    "WorkflowFailed": {"Type": "Fail", "Error": "WorkflowError"}
   }
 }
