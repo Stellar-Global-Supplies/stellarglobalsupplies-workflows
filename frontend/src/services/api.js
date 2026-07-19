@@ -45,3 +45,10 @@ export const lookupOrder = (orderId = '', productType = '') =>
   apiRequest('GET', `/data/orders/lookup?order_id=${encodeURIComponent(orderId)}&product_type=${encodeURIComponent(productType)}`)
 export const repostSocialPost = (id)    => apiRequest('POST', `/data/social-posts/${id}/repost`, {})
 export const republishBlogPost = (id)   => apiRequest('POST', `/data/blog-posts/${id}/republish`, {})
+
+// ── Schedules ──────────────────────────────────────────────
+export const getSchedules        = (qs = '') => apiRequest('GET',    `/schedules?${qs}`)
+export const createSchedule      = (body)    => apiRequest('POST',   '/schedules', body)
+export const updateSchedule      = (id, body)=> apiRequest('PATCH',  `/schedules/${id}`, body)
+export const deleteSchedule      = (id)      => apiRequest('DELETE', `/schedules/${id}`)
+export const toggleSchedule      = (id, enabled) => apiRequest('PATCH', `/schedules/${id}/toggle`, { enabled })

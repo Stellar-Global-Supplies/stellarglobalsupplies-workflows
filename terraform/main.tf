@@ -307,10 +307,25 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/${var.project_name}/*"
       },
       {
-        Sid      = "EventBridge"
-        Effect   = "Allow"
-        Action   = ["events:PutRule", "events:PutTargets", "events:DeleteRule", "events:RemoveTargets"]
+        Sid    = "EventBridge"
+        Effect = "Allow"
+        Action = [
+          "events:PutRule",
+          "events:PutTargets",
+          "events:DeleteRule",
+          "events:RemoveTargets",
+          "events:EnableRule",
+          "events:DisableRule",
+          "events:DescribeRule",
+          "events:ListTargetsByRule",
+        ]
         Resource = "*"
+      },
+      {
+        Sid      = "PassRoleToEvents"
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = aws_iam_role.events_sfn.arn
       }
     ]
   })
@@ -418,6 +433,7 @@ locals {
     workflow-trigger    = { handler = "api.workflow_trigger.handler", source = "../backend/lambdas" }
     approval-handler    = { handler = "api.approval_handler.handler", source = "../backend/lambdas" }
     data-handler        = { handler = "api.data_handler.handler", source = "../backend/lambdas" }
+    schedule-handler    = { handler = "api.schedule_handler.handler", source = "../backend/lambdas" }
   }
 }
 
@@ -612,9 +628,59 @@ resource "aws_apigatewayv2_route" "data_actions" {
   target    = "integrations/${aws_apigatewayv2_integration.data_handler.id}"
 }
 
+# Schedule handler integration
+resource "aws_apigatewayv2_integration" "schedule_handler" {
+  api_id                 = aws_apigatewayv2_api.main.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.functions["schedule-handler"].invoke_arn
+  payload_format_version = "2.0"
+}
+
+# GET /schedules  — list all
+resource "aws_apigatewayv2_route" "schedules_list" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /schedules"
+  target    = "integrations/${aws_apigatewayv2_integration.schedule_handler.id}"
+}
+
+# POST /schedules  — create
+resource "aws_apigatewayv2_route" "schedules_create" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /schedules"
+  target    = "integrations/${aws_apigatewayv2_integration.schedule_handler.id}"
+}
+
+# GET /schedules/{id}  — get one
+resource "aws_apigatewayv2_route" "schedules_get" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /schedules/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.schedule_handler.id}"
+}
+
+# PATCH /schedules/{id}  — update
+resource "aws_apigatewayv2_route" "schedules_update" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "PATCH /schedules/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.schedule_handler.id}"
+}
+
+# DELETE /schedules/{id}  — delete
+resource "aws_apigatewayv2_route" "schedules_delete" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "DELETE /schedules/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.schedule_handler.id}"
+}
+
+# PATCH /schedules/{id}/toggle  — enable/disable
+resource "aws_apigatewayv2_route" "schedules_toggle" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "PATCH /schedules/{id}/toggle"
+  target    = "integrations/${aws_apigatewayv2_integration.schedule_handler.id}"
+}
+
 # Lambda permissions for API Gateway
 resource "aws_lambda_permission" "apigw_trigger" {
-  for_each      = toset(["workflow-trigger", "approval-handler", "data-handler"])
+  for_each      = toset(["workflow-trigger", "approval-handler", "data-handler", "schedule-handler"])
   statement_id  = "AllowAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.functions[each.key].function_name
