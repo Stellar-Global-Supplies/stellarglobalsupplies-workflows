@@ -133,6 +133,12 @@ def _handle_action(path: str, db):
         rows = db.select("social_posts", params=f"id=eq.{post_id}&limit=1")
         if not rows:
             return err("Social post not found", 404)
+        # Mark as publishing before invoking so any DB write from post_to_platforms
+        # is an update from a valid status, not a constraint-violating cold write
+        try:
+            db.update("social_posts", {"status": "publishing"}, params=f"id=eq.{post_id}")
+        except Exception as e:
+            print(f"[repost] could not set publishing status: {e}")
         result = post_to_platforms_handler({"postId": post_id, "post": rows[0]}, None)
         return ok({"message": "Social post reposted", "result": result})
 

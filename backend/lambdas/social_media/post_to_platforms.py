@@ -115,7 +115,16 @@ def handler(event, context):
         }
 
     success_count = sum(1 for r in results.values() if r.get("success"))
-    overall_status = "posted" if success_count == len(results) else "partial" if success_count > 0 else "failed"
+    total_count   = len(results)
+
+    if total_count == 0:
+        overall_status = "posted"          # nothing was requested → treat as done
+    elif success_count == total_count:
+        overall_status = "posted"
+    elif success_count > 0:
+        overall_status = "partial"
+    else:
+        overall_status = "failed"
 
     db  = get_client()
     now = now_iso()
