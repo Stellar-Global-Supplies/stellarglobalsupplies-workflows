@@ -1,44 +1,49 @@
 """
-Bedrock client — Nova Pro for text, layered image fallback.
+Bedrock client — Nova Pro for text, Stability AI via Bedrock for images.
 
-Image fallback order (cheapest/most available first):
-  1. Pollinations.AI          — FREE, no key, no signup, real Flux AI images via HTTP
-  2. amazon.nova-canvas-v1:0  — free once Model Access is enabled in Bedrock console
-  3. stability.stable-image-core-v1:0  — current Stability model on Bedrock
-  4. stability.sd3-large-v1:0          — SD3 on Bedrock
-  5. Branded SVG placeholder  — pure Python, zero cost, always works, stored in S3 as .svg
+Model Access page was retired — all Bedrock models are now auto-enabled.
 
-Other cheap options (not wired in here, easy to add):
-  - Replicate Flux:    ~$0.003/image  https://replicate.com  (REPLICATE_API_TOKEN)
-  - Fal.ai Flux:       ~$0.003/image  https://fal.ai         (FAL_KEY)
-  - Stability AI direct: $0.003-0.08  https://stability.ai   (separate from Bedrock)
+Image fallback order:
+  1. stability.sd3-5-large-v1:0    — best quality, ~$0.065/image  (us-west-2)
+  2. stability.stable-image-core-v1:0 — good quality, ~$0.003/image (us-west-2)
+  3. Branded SVG placeholder       — zero cost, always works
+
+All Stability models live in us-west-2. Text (Nova Pro) stays in us-east-1.
 """
 import boto3
 import json
 import base64
 import os
-import socket
-import threading
-import urllib.request
-import urllib.parse
 from typing import Optional
 
-_bedrock_runtime = None
+_bedrock_text   = None   # us-east-1 — Nova Pro
+_bedrock_image  = None   # us-west-2 — Stability AI
 
 
-def get_bedrock_runtime():
-    global _bedrock_runtime
-    if _bedrock_runtime is None:
-        _bedrock_runtime = boto3.client(
+def _get_text_client():
+    global _bedrock_text
+    if _bedrock_text is None:
+        _bedrock_text = boto3.client(
             "bedrock-runtime",
             region_name=os.environ.get("AWS_REGION", "us-east-1"),
         )
-    return _bedrock_runtime
+    return _bedrock_text
 
 
-# ─── TEXT — Amazon Nova Pro ───────────────────────────────────────────────────
+def _get_image_client():
+    global _bedrock_image
+    if _bedrock_image is None:
+        # Stability models are hosted in us-west-2 regardless of primary region
+        _bedrock_image = boto3.client(
+            "bedrock-runtime",
+            region_name="us-west-2",
+        )
+    return _bedrock_image
+
+
+# ─── TEXT — Amazon Nova Pro (us-east-1) ──────────────────────────────────────
 def generate_text(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
-    client   = get_bedrock_runtime()
+    client   = _get_text_client()
     model_id = os.environ.get("BEDROCK_TEXT_MODEL", "amazon.nova-pro-v1:0")
     body = {
         "messages": [{"role": "user", "content": [{"text": prompt}]}],
@@ -57,7 +62,6 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
     last_exc = None
     for attempt in range(2):
         text = generate_text(prompt, system=sys_p, max_tokens=max_tokens).strip()
-        # Strip markdown fences if present
         if text.startswith("```"):
             parts = text.split("```")
             text  = parts[1][4:] if parts[1].startswith("json") else parts[1]
@@ -70,90 +74,48 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
     raise ValueError(f"Nova returned invalid JSON after 2 attempts: {last_exc}") from last_exc
 
 
-# ─── IMAGE option 1: Pollinations.AI ─────────────────────────────────────────
-# Free · No API key · No signup · Real Flux AI · Plain HTTP GET
-# Docs: https://pollinations.ai
-def _pollinations(prompt: str, width: int = 1024, height: int = 1024) -> Optional[bytes]:
-    # Clamp to supported range
-    w = min(max(width,  256), 1920)
-    h = min(max(height, 256), 1920)
-    encoded = urllib.parse.quote(prompt[:500], safe="")
-    url = (
-        f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={w}&height={h}&model=flux&nologo=true&enhance=false"
+# ─── IMAGE — Stability AI via Bedrock (us-west-2) ────────────────────────────
+# Model Access page retired — models auto-enabled, no manual approval needed.
+# All three models share the same request/response format.
+#
+# Pricing (on-demand):
+#   sd3-5-large      $0.065/image  — best quality, 8B params, photorealistic
+#   stable-image-core $0.003/image  — fast, great for social posts
+
+_STABILITY_MODELS = [
+    "stability.sd3-5-large-v1:0",        # best quality
+    "stability.stable-image-core-v1:0",  # cheapest fallback
+]
+
+
+def _invoke_stability(model_id: str, prompt: str) -> bytes:
+    client = _get_image_client()
+    body   = json.dumps({
+        "prompt":        prompt[:10000],
+        "mode":          "text-to-image",
+        "aspect_ratio":  "1:1",
+        "output_format": "png",
+    })
+    print(f"[bedrock] invoking {model_id}")
+    resp = client.invoke_model(
+        modelId=model_id,
+        body=body,
+        contentType="application/json",
+        accept="application/json",
     )
-    req = urllib.request.Request(url, headers={"User-Agent": "StellarWorkflows/1.0"})
-
-    # Hard 20-second wall-clock deadline — urllib's timeout only guards each socket
-    # read op, so a server that trickles data could stall indefinitely without this.
-    result_holder: list = []
-    error_holder:  list = []
-
-    def _fetch():
-        try:
-            # socket timeout covers connect + idle-read; 20 s is generous for Pollinations
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                result_holder.append(resp.read())
-        except Exception as exc:
-            error_holder.append(exc)
-
-    t = threading.Thread(target=_fetch, daemon=True)
-    t.start()
-    t.join(timeout=20)          # hard wall-clock cap
-
-    if t.is_alive():
-        # Thread still blocked — give up and let SVG fallback handle it
-        raise TimeoutError("Pollinations did not respond within 20 seconds")
-    if error_holder:
-        raise error_holder[0]
-
-    data = result_holder[0]
-    if len(data) < 1000:        # sanity: real image > 1 KB
-        raise ValueError(f"Pollinations returned suspiciously small payload: {len(data)} bytes")
-    return data
+    result = json.loads(resp["body"].read())
+    # Both models return {"images": ["<base64>"], ...}
+    img_bytes = base64.b64decode(result["images"][0])
+    if len(img_bytes) < 1000:
+        raise ValueError(f"Image too small: {len(img_bytes)} bytes")
+    return img_bytes
 
 
-# ─── IMAGE option 2-4: Bedrock models ────────────────────────────────────────
-def _nova_canvas(client, prompt: str, width: int, height: int) -> bytes:
-    w = min(max((width  // 64) * 64, 320), 1408)
-    h = min(max((height // 64) * 64, 320), 1408)
-    body = {
-        "taskType": "TEXT_IMAGE",
-        "textToImageParams": {"text": prompt[:512]},
-        "imageGenerationConfig": {
-            "numberOfImages": 1, "width": w, "height": h,
-            "quality": "standard", "cfgScale": 8.0,
-        },
-    }
-    r = client.invoke_model(modelId="amazon.nova-canvas-v1:0", body=json.dumps(body),
-                            contentType="application/json", accept="application/json")
-    return base64.b64decode(json.loads(r["body"].read())["images"][0])
-
-
-def _stable_image_core(client, prompt: str, width: int, height: int) -> bytes:
-    body = {"prompt": prompt[:10000], "aspect_ratio": "1:1", "output_format": "png"}
-    r = client.invoke_model(modelId="stability.stable-image-core-v1:0", body=json.dumps(body),
-                            contentType="application/json", accept="application/json")
-    return base64.b64decode(json.loads(r["body"].read())["images"][0])
-
-
-def _sd3_large(client, prompt: str, width: int, height: int) -> bytes:
-    body = {"prompt": prompt[:10000], "mode": "text-to-image", "output_format": "png"}
-    r = client.invoke_model(modelId="stability.sd3-large-v1:0", body=json.dumps(body),
-                            contentType="application/json", accept="application/json")
-    return base64.b64decode(json.loads(r["body"].read())["images"][0])
-
-
-# ─── IMAGE option 5: Branded SVG placeholder ─────────────────────────────────
-# Pure Python · zero cost · zero deps · always works
-# Produces a branded navy/gold SVG — readable in any browser/img tag
+# ─── IMAGE fallback: Branded SVG placeholder ─────────────────────────────────
 def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
-    # Extract first ~60 chars as label
-    label   = (prompt[:58] + "…") if len(prompt) > 60 else prompt
-    # Escape XML special chars
+    label = (prompt[:58] + "…") if len(prompt) > 60 else prompt
     for ch, esc in [("&","&amp;"),("<","&lt;"),(">","&gt;"),("\"","&quot;")]:
         label = label.replace(ch, esc)
-
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -164,20 +126,16 @@ def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024)
   <rect width="{width}" height="{height}" fill="url(#bg)"/>
   <rect x="40" y="40" width="{width-80}" height="{height-80}" rx="16"
         fill="none" stroke="#F59E0B" stroke-width="2" opacity="0.4"/>
-  <!-- S logo mark -->
   <circle cx="{width//2}" cy="{height//2 - 80}" r="54" fill="#F59E0B" opacity="0.15"/>
   <text x="{width//2}" y="{height//2 - 58}"
         font-family="Arial,sans-serif" font-size="64" font-weight="bold"
         fill="#F59E0B" text-anchor="middle">S</text>
-  <!-- Company name -->
   <text x="{width//2}" y="{height//2 + 10}"
         font-family="Arial,sans-serif" font-size="22" font-weight="600"
         fill="#FFFFFF" text-anchor="middle">Stellar Global Supplies</text>
-  <!-- Prompt label -->
   <text x="{width//2}" y="{height//2 + 46}"
         font-family="Arial,sans-serif" font-size="13"
         fill="#94A3B8" text-anchor="middle">{label}</text>
-  <!-- AI badge -->
   <rect x="{width//2 - 52}" y="{height//2 + 72}" width="104" height="26" rx="13"
         fill="#F59E0B" opacity="0.18"/>
   <text x="{width//2}" y="{height//2 + 90}"
@@ -187,52 +145,20 @@ def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024)
     return svg.encode("utf-8")
 
 
-# ─── Errors that mean "model not available" (skip, try next) ─────────────────
-_SKIP_ERRORS = (
-    "EndOfLife", "end of its life", "ResourceNotFoundException",
-    "ValidationException", "AccessDeniedException", "Access denied", "marked",
-)
-
-
 def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Optional[bytes]:
     """
-    Returns image bytes (PNG or SVG) or None.
-    The SVG fallback means this almost never returns None.
-    Callers check the extension via img_key to set correct ContentType.
+    Returns image bytes (PNG or SVG).
+    Tries Stability AI models via Bedrock (us-west-2) best → cheapest,
+    falls back to branded SVG if all fail.
+    No API keys needed — billed through AWS.
     """
-
-    # ── 1. Pollinations.AI (free, no key) ────────────────────
-    try:
-        print("[bedrock] trying Pollinations.AI (free)")
-        data = _pollinations(prompt, width, height)
-        if data:
-            print(f"[bedrock] Pollinations OK ({len(data):,} bytes)")
-            return data
-    except Exception as e:
-        print(f"[bedrock] Pollinations failed ({str(e)[:120]}) — trying Bedrock")
-
-    # ── 2-4. Bedrock models ───────────────────────────────────
-    bedrock_models = [
-        ("nova-canvas",        _nova_canvas),
-        ("stable-image-core",  _stable_image_core),
-        ("sd3-large",          _sd3_large),
-    ]
-    client = get_bedrock_runtime()
-    for name, fn in bedrock_models:
+    for model_id in _STABILITY_MODELS:
         try:
-            print(f"[bedrock] trying Bedrock model: {name}")
-            data = fn(client, prompt, width, height)
-            if data:
-                print(f"[bedrock] {name} OK")
-                return data
+            data = _invoke_stability(model_id, prompt)
+            print(f"[bedrock] {model_id} OK ({len(data):,} bytes)")
+            return data
         except Exception as e:
-            msg = str(e)
-            if any(k in msg for k in _SKIP_ERRORS):
-                print(f"[bedrock] {name} unavailable ({msg[:120]}) — next")
-            else:
-                print(f"[bedrock] {name} error ({msg[:200]}) — next")
-            continue
+            print(f"[bedrock] {model_id} failed ({str(e)[:200]}) — trying next")
 
-    # ── 5. Branded SVG placeholder (always works) ─────────────
-    print("[bedrock] all AI models failed — using branded SVG placeholder")
+    print("[bedrock] all Stability models failed — using branded SVG placeholder")
     return _branded_svg_placeholder(prompt, width, height)
