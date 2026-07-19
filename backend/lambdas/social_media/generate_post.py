@@ -178,7 +178,7 @@ Return JSON:
         "image_url":      image_url,
         "image_s3_key":   img_key,
         "image_prompt":   img_prompt or None,
-        "platforms":      {"facebook": True, "instagram": True, "linkedin": True},
+        "platforms":      event.get("platforms") or {"facebook": True, "instagram": True, "linkedin": True},
         "order_id":       order_id if post_type == "product" and order_id else None,
         "repo_name":      repo_name if post_type == "tech" and repo_name else None,
         "prompt":         prompt or None,

@@ -6,6 +6,45 @@ import { Share2, Play, Facebook, Instagram, Linkedin, Image as ImgIcon, Repeat2,
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
+const PLATFORMS = [
+  { key: 'facebook',  label: 'Facebook',  Icon: Facebook,  color: 'text-[#1877F2]' },
+  { key: 'instagram', label: 'Instagram', Icon: Instagram, color: 'text-[#E1306C]' },
+  { key: 'linkedin',  label: 'LinkedIn',  Icon: Linkedin,  color: 'text-[#0A66C2]' },
+]
+
+function PlatformPicker({ value, onChange }) {
+  const toggle = key => onChange({ ...value, [key]: !value[key] })
+  const anySelected = Object.values(value).some(Boolean)
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-2">
+        {PLATFORMS.map(({ key, label, Icon, color }) => {
+          const active = value[key]
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => toggle(key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all
+                ${active
+                  ? 'border-navy bg-navy/5 text-navy'
+                  : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-500'
+                }`}
+            >
+              <Icon size={13} className={active ? color : ''} />
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      {!anySelected && (
+        <p className="text-xs text-amber-600">Select at least one platform</p>
+      )}
+    </div>
+  )
+}
+
 export default function SocialMediaPost() {
   const qc = useQueryClient()
   const [form, setForm] = useState({
@@ -14,6 +53,7 @@ export default function SocialMediaPost() {
     product_name: '',
     product_type: '',
     prompt: '',
+    platforms: { facebook: true, instagram: true, linkedin: false }, // FB+IG default for product
   })
   const [running, setRunning] = useState(false)
   const [lookupLoading, setLookupLoading] = useState(false)
@@ -27,7 +67,10 @@ export default function SocialMediaPost() {
   })
   const posts = data?.posts || []
 
+  const anyPlatform = Object.values(form.platforms).some(Boolean)
+
   async function launch() {
+    if (!anyPlatform) { toast.error('Select at least one platform'); return }
     setRunning(true)
     try {
       const payload = {
@@ -36,6 +79,7 @@ export default function SocialMediaPost() {
         product_name: form.product_name,
         product_type: form.product_type,
         prompt:       form.prompt,
+        platforms:    form.platforms,
       }
       const res = await startWorkflow('social-product', payload)
       toast.success(`Product post workflow started — ${res.workflowRunId?.slice(0,8)}`)
@@ -72,16 +116,10 @@ export default function SocialMediaPost() {
     }
   }
 
-  const PlatformIcon = ({ platform, active }) => {
-    const icons = { facebook: Facebook, instagram: Instagram, linkedin: Linkedin }
-    const Ic = icons[platform] || Share2
-    return <Ic size={14} className={active ? 'text-royal' : 'text-slate-300'} />
-  }
-
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <PageHeader icon={Share2} title="Product Social Posts"
-        sub="Pull from orders → AI generates image + caption → approval → post to Facebook, Instagram, LinkedIn" />
+        sub="Pull from orders → AI generates image + caption → approval → post to selected platforms" />
 
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
         {['launch','posts'].map(t => (
@@ -128,19 +166,19 @@ export default function SocialMediaPost() {
               <textarea value={form.prompt} onChange={e => setForm(f => ({...f, prompt: e.target.value}))}
                 className="input resize-none h-20" placeholder="Emphasise bulk discounts and fast delivery…" />
             </FormField>
+            <FormField label="Publish To" hint="Select which platforms to post to">
+              <PlatformPicker
+                value={form.platforms}
+                onChange={platforms => setForm(f => ({...f, platforms}))}
+              />
+            </FormField>
           </div>
 
-          <div className="mt-5 flex flex-col gap-3">
-            <button onClick={launch} disabled={running} className="btn-primary justify-center py-2.5">
-              {running ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Starting…</>
-                : <><Play size={15} /> Generate Post</>}
-            </button>
-            <div className="flex items-center justify-center gap-4 text-xs text-slate-400">
-              <span className="flex items-center gap-1"><PlatformIcon platform="facebook" active /> Facebook</span>
-              <span className="flex items-center gap-1"><PlatformIcon platform="instagram" active /> Instagram</span>
-              <span className="flex items-center gap-1"><PlatformIcon platform="linkedin" active /> LinkedIn (manual)</span>
-            </div>
-          </div>
+          <button onClick={launch} disabled={running || !anyPlatform} className="btn-primary w-full justify-center py-2.5 mt-5">
+            {running
+              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Starting…</>
+              : <><Play size={15} /> Generate Post</>}
+          </button>
         </div>
       )}
 
@@ -174,12 +212,11 @@ export default function SocialMediaPost() {
                       <span className="text-xs text-slate-400">
                         {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
                       </span>
-                      {post.order_uuid && <span className="text-xs text-slate-400">Order UUID: {post.order_uuid}</span>}
-                      {!post.order_uuid && post.order_id && <span className="text-xs text-slate-400">Order: {post.order_id}</span>}
+                      {post.order_id && <span className="text-xs text-slate-400">Order: {post.order_id}</span>}
                       <span className="flex gap-1 ml-auto">
-                        {['facebook','instagram','linkedin'].map(p => (
-                          <span key={p} title={p}>
-                            <PlatformIcon platform={p} active={post.platforms?.[p]} />
+                        {PLATFORMS.map(({ key, Icon, color }) => (
+                          <span key={key} title={key}>
+                            <Icon size={13} className={post.platforms?.[key] ? color : 'text-slate-200'} />
                           </span>
                         ))}
                       </span>
