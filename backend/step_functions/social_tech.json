@@ -18,9 +18,7 @@
         "prompt.$": "$.prompt",
         "repo_name.$": "$.repo_name",
         "contextText.$": "$.contextText",
-        "workflowRunId.$": "$.workflowRunId",
-        "socialWorkflowId.$": "$.socialWorkflowId",
-        "platforms.$": "$.platforms"
+        "workflowRunId.$": "$.workflowRunId"
       },
       "ResultPath": "$",
       "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
