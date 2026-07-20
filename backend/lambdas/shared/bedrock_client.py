@@ -2,7 +2,7 @@
 Bedrock client — Nova Pro for text, Nova Canvas + Stability AI for images.
 
 Image fallback order:
-  1. Pollinations.ai               — free, no auth, no AWS, 20-second hard timeout
+  1. FLUX.1-schnell via Gradio     — free, no auth, no AWS, fast (~10-20s)
   2. amazon.nova-canvas-v1:0       — AWS-native, no Marketplace needed (legacy, needs prior use)
   3. us.amazon.nova-canvas-v1:0    — cross-region inference profile variant
   4. stability.sd3-5-large-v1:0    — best quality, ~$0.065/image (needs Marketplace)
@@ -19,7 +19,6 @@ import os
 import random
 import threading
 import urllib.request
-import urllib.parse
 from typing import Optional
 from botocore.config import Config
 
@@ -196,42 +195,116 @@ def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024)
     return svg.encode("utf-8")
 
 
-# ─── IMAGE 0 — Pollinations.ai (free, no auth, hard 20-second deadline) ─────
-def _pollinations(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
-    w = min(max(width,  256), 1920)
-    h = min(max(height, 256), 1920)
-    encoded = urllib.parse.quote(prompt[:500], safe="")
-    url = (
-        f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={w}&height={h}&model=flux&nologo=true&enhance=false"
-    )
-    req = urllib.request.Request(url, headers={"User-Agent": "StellarWorkflows/1.0"})
+# ─── IMAGE 0 — FLUX.1-schnell via Hugging Face Gradio (free, no auth) ────────
+_FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
+_FLUX_TIMEOUT = 60  # seconds — Gradio spaces can be slow on cold start
 
-    # Hard 20-second wall-clock cap — urllib timeout only guards idle socket reads;
-    # a server that trickles data can stall indefinitely without this thread guard.
+
+def _flux_gradio(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
+    """
+    Calls FLUX.1-schnell on HuggingFace Spaces via Gradio REST API.
+    No API key required. Returns PNG bytes.
+    """
+    # Clamp to FLUX supported range (multiples of 8)
+    w = max(256, min(1024, (width  // 8) * 8))
+    h = max(256, min(1024, (height // 8) * 8))
+
+    # Step 1: join the queue
+    queue_url = f"https://black-forest-labs-flux-1-schnell.hf.space/queue/join"
+    payload = json.dumps({
+        "data": [
+            prompt[:500],   # prompt
+            0,              # seed
+            True,           # randomize_seed
+            w,              # width
+            h,              # height
+            4,              # num_inference_steps (4 is optimal for schnell)
+        ],
+        "event_data": None,
+        "fn_index": 0,
+        "trigger_id": 6,
+        "session_hash": base64.urlsafe_b64encode(os.urandom(8)).decode().rstrip("="),
+    }).encode()
+
+    req = urllib.request.Request(
+        queue_url,
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "StellarWorkflows/1.0"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        join_result = json.loads(resp.read())
+
+    event_id = join_result.get("event_id")
+    if not event_id:
+        raise RuntimeError(f"FLUX Gradio: no event_id in join response: {join_result}")
+
+    # Step 2: poll the SSE stream for the result
+    stream_url = f"https://black-forest-labs-flux-1-schnell.hf.space/queue/data?session_hash={join_result.get('session_hash', '')}"
     result_holder: list = []
     error_holder:  list = []
 
-    def _fetch():
+    def _stream():
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                result_holder.append(resp.read())
+            req2 = urllib.request.Request(
+                stream_url,
+                headers={"Accept": "text/event-stream", "User-Agent": "StellarWorkflows/1.0"},
+            )
+            with urllib.request.urlopen(req2, timeout=_FLUX_TIMEOUT) as resp:
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = json.loads(line[5:].strip())
+                    if data.get("msg") == "process_completed":
+                        result_holder.append(data)
+                        return
+                    if data.get("msg") == "queue_full":
+                        error_holder.append(RuntimeError("FLUX Gradio: queue full"))
+                        return
         except Exception as exc:
             error_holder.append(exc)
 
-    t = threading.Thread(target=_fetch, daemon=True)
+    t = threading.Thread(target=_stream, daemon=True)
     t.start()
-    t.join(timeout=20)
+    t.join(timeout=_FLUX_TIMEOUT + 5)
 
     if t.is_alive():
-        raise TimeoutError("Pollinations.ai did not respond within 20 seconds")
+        raise TimeoutError(f"FLUX Gradio did not respond within {_FLUX_TIMEOUT}s")
     if error_holder:
         raise error_holder[0]
+    if not result_holder:
+        raise RuntimeError("FLUX Gradio: stream ended without process_completed")
 
-    data = result_holder[0]
-    if len(data) < 1000:
-        raise ValueError(f"Pollinations returned too-small payload: {len(data)} bytes")
-    return data
+    # Step 3: extract image — output is a file URL or base64
+    output = result_holder[0].get("output", {})
+    data_list = output.get("data", [])
+    if not data_list:
+        raise ValueError(f"FLUX Gradio: empty output data: {output}")
+
+    img_info = data_list[0]  # first output is the image
+
+    # Could be {"url": "..."} or {"path": "..."} or a raw base64 string
+    if isinstance(img_info, dict):
+        img_url = img_info.get("url") or img_info.get("path")
+        if not img_url:
+            raise ValueError(f"FLUX Gradio: no url/path in image output: {img_info}")
+        # Make absolute if relative
+        if img_url.startswith("/"):
+            img_url = f"https://black-forest-labs-flux-1-schnell.hf.space{img_url}"
+        fetch_req = urllib.request.Request(img_url, headers={"User-Agent": "StellarWorkflows/1.0"})
+        with urllib.request.urlopen(fetch_req, timeout=30) as img_resp:
+            img_bytes = img_resp.read()
+    elif isinstance(img_info, str) and img_info.startswith("data:image"):
+        img_bytes = base64.b64decode(img_info.split(",", 1)[1])
+    else:
+        raise ValueError(f"FLUX Gradio: unexpected image format: {type(img_info)}")
+
+    if len(img_bytes) < 1000:
+        raise ValueError(f"FLUX Gradio returned too-small image: {len(img_bytes)} bytes")
+
+    print(f"[bedrock] FLUX.1-schnell Gradio OK ({len(img_bytes):,} bytes)")
+    return img_bytes
 
 
 # ─── PUBLIC API ───────────────────────────────────────────────────────────────
@@ -240,18 +313,18 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
     Returns image bytes (PNG or SVG).
 
     Fallback order:
-      1. Nova Canvas    — AWS-native, no Marketplace needed
-      2. Stability SD3  — best quality, needs Marketplace subscription
-      3. Stability Core — cheaper, needs Marketplace subscription
-      4. SVG placeholder — always works, zero cost
+      1. FLUX.1-schnell — free, no auth, fast via Gradio
+      2. Nova Canvas    — AWS-native, no Marketplace needed
+      3. Stability SD3  — best quality, needs Marketplace subscription
+      4. Stability Core — cheaper, needs Marketplace subscription
+      5. SVG placeholder — always works, zero cost
     """
-    # ── 1. Pollinations.ai (free, no auth, no AWS) ───────────────────────────
+    # ── 1. FLUX.1-schnell via Gradio (free, no auth) ─────────────────────────
     try:
-        data = _pollinations(prompt, width, height)
-        print(f"[bedrock] Pollinations.ai OK ({len(data):,} bytes)")
+        data = _flux_gradio(prompt, width, height)
         return data
     except Exception as e:
-        print(f"[bedrock] Pollinations.ai failed ({str(e)[:180]}) — trying Nova Canvas")
+        print(f"[bedrock] FLUX.1-schnell Gradio failed ({str(e)[:180]}) — trying Nova Canvas")
 
     # ── 2. Nova Canvas (direct, then cross-region profile) ────────────────────
     for canvas_id in ("amazon.nova-canvas-v1:0", "us.amazon.nova-canvas-v1:0"):
