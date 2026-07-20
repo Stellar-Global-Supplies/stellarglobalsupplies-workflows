@@ -195,6 +195,39 @@ def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024)
     return svg.encode("utf-8")
 
 
+# ─── IMAGE PROMPT ENHANCER — Nova Pro rewrites prompt for FLUX ───────────────
+_ENHANCE_SYSTEM = """You are an expert image prompt engineer for FLUX.1, a state-of-the-art text-to-image model.
+Your job is to rewrite a short product/scene description into a rich, detailed FLUX prompt that produces
+professional, photorealistic images with proper backgrounds, lighting, and composition.
+
+Rules:
+- Always include: subject details, background/environment, lighting style, camera angle, mood/atmosphere
+- For product shots: use studio or lifestyle backgrounds, never plain white unless asked
+- Keep it under 200 words
+- Output ONLY the enhanced prompt — no explanation, no preamble, no quotes"""
+
+_ENHANCE_USER = """Rewrite this into a detailed FLUX image generation prompt:
+
+\"{prompt}\"
+
+Enhanced prompt:"""
+
+
+def _enhance_prompt(prompt: str) -> str:
+    """Use Nova Pro to rewrite a short prompt into a rich FLUX-ready prompt."""
+    try:
+        enhanced = generate_text(
+            _ENHANCE_USER.format(prompt=prompt),
+            system=_ENHANCE_SYSTEM,
+            max_tokens=300,
+        ).strip()
+        print(f"[bedrock] prompt enhanced: {enhanced[:120]}...")
+        return enhanced
+    except Exception as e:
+        print(f"[bedrock] prompt enhancement failed ({e}) — using original prompt")
+        return prompt
+
+
 # ─── IMAGE 0 — FLUX.1-schnell via Hugging Face Gradio (free, no auth) ────────
 _FLUX_BASE    = "https://black-forest-labs-flux-1-schnell.hf.space"
 _FLUX_TIMEOUT = 120  # seconds — ZeroGPU spaces can queue
@@ -321,9 +354,12 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
       4. Stability Core — cheaper, needs Marketplace subscription
       5. SVG placeholder — always works, zero cost
     """
+    # ── 0. Enhance prompt with Nova Pro before any image model ────────────────
+    enhanced_prompt = _enhance_prompt(prompt)
+
     # ── 1. FLUX.1-schnell via Gradio (free, no auth) ─────────────────────────
     try:
-        data = _flux_gradio(prompt, width, height)
+        data = _flux_gradio(enhanced_prompt, width, height)
         return data
     except Exception as e:
         print(f"[bedrock] FLUX.1-schnell Gradio failed ({str(e)[:180]}) — trying Nova Canvas")
@@ -331,16 +367,16 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
     # ── 2. Nova Canvas (direct, then cross-region profile) ────────────────────
     for canvas_id in ("amazon.nova-canvas-v1:0", "us.amazon.nova-canvas-v1:0"):
         try:
-            data = _invoke_nova_canvas(prompt, width, height, model_id=canvas_id)
+            data = _invoke_nova_canvas(enhanced_prompt, width, height, model_id=canvas_id)
             print(f"[bedrock] {canvas_id} OK ({len(data):,} bytes)")
             return data
         except Exception as e:
             print(f"[bedrock] {canvas_id} failed ({str(e)[:180]}) — trying next")
 
-    # ── 2 & 3. Stability AI ───────────────────────────────────
+    # ── 3 & 4. Stability AI ───────────────────────────────────────────────────
     for model_id in _STABILITY_MODELS:
         try:
-            data = _invoke_stability(model_id, prompt)
+            data = _invoke_stability(model_id, enhanced_prompt)
             print(f"[bedrock] {model_id} OK ({len(data):,} bytes)")
             return data
         except Exception as e:
