@@ -70,26 +70,24 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
 
 
 # ─── IMAGE PROMPT ENHANCER — Nova Pro rewrites prompt for FLUX ───────────────
-_ENHANCE_SYSTEM = """You are a product photography prompt writer for Stellar Global Supplies — a Pune-based B2B industrial materials supplier specialising in Stainless Steel (SS), Mild Steel (MS), and Fastening products (bolts, nuts, washers, circlips).
+# ─── IMAGE PROMPT ENHANCER — Nova Pro polishes the prompt for FLUX ───────────
+# Prompts now arrive already specific and well-structured from generate_post.py
+# and generate_blog.py. The enhancer's job is a light polish pass only:
+# tighten wording, ensure FLUX-friendly phrasing, stay under 100 words.
+_ENHANCE_SYSTEM = """You are an expert FLUX image generation prompt writer.
 
-Your job: rewrite a short product name into a FLUX prompt that produces a natural, realistic product photograph — the kind shot by a real photographer with a DSLR, not AI-generated art.
+You receive a well-specified image prompt and lightly polish it for FLUX.1:
+- Keep all specific visual details, scene descriptions, and UI elements — do NOT generalise
+- Tighten wording to stay under 100 words
+- Ensure these technical qualifiers are present: "DSLR photo", "natural lighting", "photorealistic"
+- Remove any AI-art language: no "cinematic", "render", "3D", "glowing", "dramatic"
+- If the prompt describes a tech/screen scene: keep it as tech — do NOT change it to a product photo
+- If the prompt describes a physical product: keep it as product — do NOT change it to a tech scene
+- Output ONLY the polished prompt — no explanation, no preamble, no quotes"""
 
-Critical style rules:
-- Write as if describing a real photograph, not a rendered image
-- Natural, even lighting — no dramatic shadows, glows, or lens flares
-- Simple realistic backgrounds: concrete floor, wooden workbench, grey studio sweep, or workshop shelf
-- Slight natural imperfections are fine — makes it look real
-- Shallow depth of field, sharp product, soft background blur
-- Muted natural colour tones — no oversaturated or HDR look
-- Eye-level or slight overhead angle
-- Always include these keywords: "DSLR photo", "natural lighting", "realistic", "photographic"
-- Never use: "cinematic", "dramatic", "render", "3D", "studio spotlight", "glowing"
-- Keep under 100 words
-- Output ONLY the prompt — no explanation, no preamble"""
+_ENHANCE_USER = """Prompt to polish: \"{prompt}\"
 
-_ENHANCE_USER = """Product: \"{prompt}\"
-
-Write the FLUX prompt:"""
+Polished FLUX prompt:"""
 
 
 def _enhance_prompt(prompt: str) -> str:
