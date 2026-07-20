@@ -75,3 +75,9 @@ variable "context_bucket" {
   type        = string
   default     = "stellar-global-ai-context"
 }
+
+variable "linkedin_notify_emails" {
+  description = "Comma-separated list of email addresses to notify when a LinkedIn post is ready for manual posting"
+  type        = string
+  default     = "workwithprasadbhavsar@gmail.com,stellarglobalsupplies@gmail.com"
+}

@@ -413,6 +413,7 @@ locals {
     WEBSITE_BLOG_DIR          = "content/blog"
     EVENTS_ROLE_ARN           = aws_iam_role.events_sfn.arn
     HUNTER_API_KEY_PARAM      = "/${var.project_name}/hunter/api_key"
+    LINKEDIN_NOTIFY_EMAILS    = var.linkedin_notify_emails
   }
 
   lambdas = {

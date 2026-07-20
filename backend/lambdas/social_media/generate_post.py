@@ -22,9 +22,40 @@ from shared.bedrock_client  import generate_json, generate_image
 from shared.supabase_client import get_client
 from shared.utils            import image_ext_and_type, upload_image_to_s3, upload_json_to_s3, now_iso, content_hash
 
-SYSTEM = """You are a social media manager for Stellar Global Supplies.
-Write engaging, professional posts that showcase our products and services.
-Include relevant hashtags. Keep Facebook/LinkedIn posts under 300 chars, Instagram under 200."""
+SYSTEM = """You are a senior LinkedIn content strategist for Stellar Global Supplies — a B2B industrial and commercial supplies company serving manufacturers, contractors, hospitality businesses, and procurement teams across India and globally.
+
+Facebook/Instagram: short, punchy, visual. Under 300 chars. 3-4 hashtags.
+
+LinkedIn: Long-form thought leadership. 1500-2000 characters minimum. Structure EXACTLY as follows — follow this structure without deviation:
+
+LINE 1: A bold single-sentence hook that stops the scroll. State a surprising fact, a problem, or a bold claim about the product or technology. No fluff.
+
+[blank line]
+
+PARAGRAPH 1 (3-4 sentences): The problem or context. What challenge do procurement managers, plant managers, or business owners face that this product/solution addresses? Be specific to the industry.
+
+[blank line]
+
+PARAGRAPH 2 (3-4 sentences): The product or solution in detail. What is it exactly, what are its technical or practical specs, and why does quality matter here? Reference the specific product category.
+
+[blank line]
+
+PARAGRAPH 3 (3-4 sentences): Real-world use cases and business benefits. Who specifically uses this, in which industries, and what measurable outcome do they get? Be concrete — mention sectors like manufacturing, hospitality, construction, logistics.
+
+[blank line]
+
+PARAGRAPH 4 (2-3 sentences): Why Stellar Global Supplies specifically. Our differentiators: reliable supply chain, quality assurance, competitive bulk pricing, pan-India delivery, dedicated B2B account management.
+
+[blank line]
+
+CTA LINE: A direct, specific call to action. Either "DM us for a bulk quote" or "Comment below with your requirement" or "Visit stellarglobalsupplies.com" — pick the most relevant.
+
+[blank line]
+
+HASHTAGS: 8-10 relevant hashtags on a single line covering the product category, industry, B2B, procurement, India, and Stellar brand.
+
+Rules: No em-dashes. No bullet points. Plain paragraphs only. Professional but not stiff. Write as if a knowledgeable sales director is speaking directly to a LinkedIn audience of Indian business decision-makers.
+"""
 
 
 def handler(event, context):
@@ -63,40 +94,40 @@ def handler(event, context):
     print(f"[generate_post] calling Bedrock to generate {post_type} post content")
     if post_type == "product":
         gen_prompt = f"""
-Create engaging social media posts for Stellar Global Supplies about this product:
+Create social media posts for Stellar Global Supplies about this product delivery:
 - Product: {order.get('product_name', '')}
 - Category: {order.get('product_category', '')}
 - Description: {order.get('description', '')}
 - Customer Segment: {order.get('customer_segment', '')}
-{"Custom prompt: " + prompt if prompt else ""}
+{("Custom instructions: " + prompt) if prompt else ""}
 
-Return JSON:
+Return JSON with these exact keys:
 {{
-  "title": "short post title",
-  "facebook": "facebook post text with hashtags",
-  "instagram": "instagram caption with hashtags",
-  "linkedin":  "linkedin post (professional tone)",
-  "hashtags": ["tag1", "tag2", "tag3"],
-  "image_prompt": "detailed prompt for generating a product showcase image"
+  "title": "short post title (max 10 words)",
+  "facebook": "Facebook post under 300 chars with 3-4 hashtags",
+  "instagram": "Instagram caption under 200 chars with 4-5 hashtags",
+  "linkedin": "Full LinkedIn post following the EXACT structure in the system prompt. Hook line, blank line, Problem paragraph (3-4 sentences), blank line, Product detail paragraph (3-4 sentences) including technical/practical specs, blank line, Use cases paragraph (3-4 sentences naming specific industries), blank line, Why Stellar paragraph (2-3 sentences on our supply chain and B2B strengths), blank line, CTA line, blank line, 8-10 hashtags on one line. Minimum 1500 characters. No em-dashes. No bullets.",
+  "hashtags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "image_prompt": "detailed prompt for generating a professional product showcase image — photorealistic, clean background, commercial quality"
 }}"""
     else:
         context_section = f"\n\nPlatform context:\n{context_text}" if context_text else ""
         gen_prompt = f"""
-Create an engaging tech/showcase social media post for Stellar Global Supplies about our platform.
-{"Custom prompt: " + prompt if prompt else "Highlight our workflow automation capabilities."}
-Repo: {repo_name}{context_section}
+Create social media posts for Stellar Global Supplies showcasing our technology and workflow platform.
+{("Custom instructions: " + prompt) if prompt else "Highlight our AI-powered workflow automation capabilities."}
+Repository: {repo_name}{context_section}
 
-Return JSON:
+Return JSON with these exact keys:
 {{
-  "title": "short post title",
-  "facebook": "facebook post text",
-  "instagram": "instagram caption",
-  "linkedin": "linkedin post (professional)",
-  "hashtags": ["tag1", "tag2", "tag3"],
-  "image_prompt": "prompt for a modern tech/digital workflow image"
+  "title": "short post title (max 10 words)",
+  "facebook": "Facebook post under 300 chars with 3-4 hashtags",
+  "instagram": "Instagram caption under 200 chars with 4-5 hashtags",
+  "linkedin": "Full LinkedIn post following the EXACT structure in the system prompt. Hook line about what we built, blank line, Problem paragraph (3-4 sentences on the business challenge this solves), blank line, Solution paragraph (3-4 sentences explaining the technology, key features, and how it works), blank line, Impact paragraph (3-4 sentences on business outcomes and who benefits — procurement teams, sales, operations), blank line, Why paragraph (2-3 sentences on our commitment to tech-driven B2B supply), blank line, CTA inviting connections to learn more, DM us, or comment, blank line, 8-10 hashtags on one line. Minimum 1500 characters. No em-dashes. No bullets.",
+  "hashtags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "image_prompt": "prompt for a modern tech / digital workflow showcase image — clean, professional, B2B corporate style"
 }}"""
 
-    content_data = generate_json(gen_prompt, system=SYSTEM, max_tokens=1200)
+    content_data = generate_json(gen_prompt, system=SYSTEM, max_tokens=3000)
     print(f"[generate_post] Bedrock text generation complete, title={content_data.get('title','')!r}")
 
     content_key = f"generated-content/social-posts/{post_type}/{uuid.uuid4()}.json"
