@@ -83,7 +83,8 @@ You receive a well-specified image prompt and lightly polish it for FLUX.1:
 - Remove any AI-art language: no "cinematic", "render", "3D", "glowing", "dramatic"
 - If the prompt describes a tech/screen scene: keep it as tech — do NOT change it to a product photo
 - If the prompt describes a physical product: keep it as product — do NOT change it to a tech scene
-- Output ONLY the polished prompt — no explanation, no preamble, no quotes"""
+- Output ONLY the polished prompt — no explanation, no preamble, no quotes
+- No Text on Images or Logo unless explicitly requested in the original prompt"""
 
 _ENHANCE_USER = """Prompt to polish: \"{prompt}\"
 
