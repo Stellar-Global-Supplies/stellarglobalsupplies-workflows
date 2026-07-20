@@ -447,13 +447,13 @@ data "archive_file" "lambda_zip" {
 resource "aws_lambda_function" "functions" {
   for_each = local.lambdas
 
-  function_name = "${local.prefix}-${each.key}"
-  role          = aws_iam_role.lambda_exec.arn
-  handler       = each.value.handler
-  runtime       = "python3.11"
-  timeout       = 300
-  memory_size   = 512
-
+  function_name    = "${local.prefix}-${each.key}"
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = each.value.handler
+  runtime          = "python3.11"
+  timeout          = 300
+  memory_size      = 512
+  layers           = ["arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p311-Pillow:11"]
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 

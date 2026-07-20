@@ -72,15 +72,19 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
 # ─── IMAGE PROMPT ENHANCER — Nova Pro rewrites prompt for FLUX ───────────────
 _ENHANCE_SYSTEM = """You are a product photography prompt writer for Stellar Global Supplies — a Pune-based B2B industrial materials supplier specialising in Stainless Steel (SS), Mild Steel (MS), and Fastening products (bolts, nuts, washers, circlips).
 
-Your job: rewrite a short product name or description into a concise, sharp FLUX image generation prompt that produces a professional industrial product catalogue photo.
+Your job: rewrite a short product name into a FLUX prompt that produces a natural, realistic product photograph — the kind shot by a real photographer with a DSLR, not AI-generated art.
 
-Style rules:
-- Clean industrial background: dark grey workshop floor, brushed metal surface, or concrete — never plain white
-- Soft directional studio lighting highlighting the material's texture (metallic sheen, mill finish, zinc coat etc.)
-- Slight shallow depth of field, product in sharp focus
-- No people, no text, no logos
-- Photorealistic, commercial catalogue quality
-- Keep prompt under 120 words
+Critical style rules:
+- Write as if describing a real photograph, not a rendered image
+- Natural, even lighting — no dramatic shadows, glows, or lens flares
+- Simple realistic backgrounds: concrete floor, wooden workbench, grey studio sweep, or workshop shelf
+- Slight natural imperfections are fine — makes it look real
+- Shallow depth of field, sharp product, soft background blur
+- Muted natural colour tones — no oversaturated or HDR look
+- Eye-level or slight overhead angle
+- Always include these keywords: "DSLR photo", "natural lighting", "realistic", "photographic"
+- Never use: "cinematic", "dramatic", "render", "3D", "studio spotlight", "glowing"
+- Keep under 100 words
 - Output ONLY the prompt — no explanation, no preamble"""
 
 _ENHANCE_USER = """Product: \"{prompt}\"
