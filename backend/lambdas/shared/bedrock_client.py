@@ -2,10 +2,12 @@
 Bedrock client — Nova Pro for text, Nova Canvas + Stability AI for images.
 
 Image fallback order:
-  1. amazon.nova-canvas-v1:0       — AWS-native, no Marketplace needed, us-east-1
-  2. stability.sd3-5-large-v1:0    — best quality,  ~$0.065/image (us-west-2, needs Marketplace)
-  3. stability.stable-image-core-v1:0 — cheaper,    ~$0.003/image (us-west-2, needs Marketplace)
-  4. Branded SVG placeholder        — zero cost, always works
+  1. Pollinations.ai               — free, no auth, no AWS, 20-second hard timeout
+  2. amazon.nova-canvas-v1:0       — AWS-native, no Marketplace needed (legacy, needs prior use)
+  3. us.amazon.nova-canvas-v1:0    — cross-region inference profile variant
+  4. stability.sd3-5-large-v1:0    — best quality, ~$0.065/image (needs Marketplace)
+  5. stability.stable-image-core-v1:0 — cheaper,  ~$0.003/image (needs Marketplace)
+  6. Branded SVG placeholder        — zero cost, always works
 
 Nova Canvas uses the same us-east-1 client as Nova Pro text — no extra client needed.
 Stability models use a separate us-west-2 client.
@@ -89,7 +91,7 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
 
 
 # ─── IMAGE 1 — Amazon Nova Canvas (us-east-1, no Marketplace needed) ─────────
-def _invoke_nova_canvas(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
+def _invoke_nova_canvas(prompt: str, width: int = 1024, height: int = 1024, model_id: str = "amazon.nova-canvas-v1:0") -> bytes:
     """
     Nova Canvas request schema:
       taskType / textToImageParams / imageGenerationConfig
@@ -112,10 +114,10 @@ def _invoke_nova_canvas(prompt: str, width: int = 1024, height: int = 1024) -> b
             "seed":           random.randint(0, 858_993_459),
         },
     }
-    print(f"[bedrock] invoking amazon.nova-canvas-v1:0 ({w}×{h})")
+    print(f"[bedrock] invoking {model_id} ({w}×{h})")
     client = _get_text_client()                       # us-east-1, same as Nova Pro
     resp   = client.invoke_model(
-        modelId      = "amazon.nova-canvas-v1:0",
+        modelId      = model_id,
         body         = json.dumps(body),
         contentType  = "application/json",
         accept       = "application/json",
@@ -194,6 +196,44 @@ def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024)
     return svg.encode("utf-8")
 
 
+# ─── IMAGE 0 — Pollinations.ai (free, no auth, hard 20-second deadline) ─────
+def _pollinations(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
+    w = min(max(width,  256), 1920)
+    h = min(max(height, 256), 1920)
+    encoded = urllib.parse.quote(prompt[:500], safe="")
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width={w}&height={h}&model=flux&nologo=true&enhance=false"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "StellarWorkflows/1.0"})
+
+    # Hard 20-second wall-clock cap — urllib timeout only guards idle socket reads;
+    # a server that trickles data can stall indefinitely without this thread guard.
+    result_holder: list = []
+    error_holder:  list = []
+
+    def _fetch():
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                result_holder.append(resp.read())
+        except Exception as exc:
+            error_holder.append(exc)
+
+    t = threading.Thread(target=_fetch, daemon=True)
+    t.start()
+    t.join(timeout=20)
+
+    if t.is_alive():
+        raise TimeoutError("Pollinations.ai did not respond within 20 seconds")
+    if error_holder:
+        raise error_holder[0]
+
+    data = result_holder[0]
+    if len(data) < 1000:
+        raise ValueError(f"Pollinations returned too-small payload: {len(data)} bytes")
+    return data
+
+
 # ─── PUBLIC API ───────────────────────────────────────────────────────────────
 def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Optional[bytes]:
     """
@@ -205,13 +245,22 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
       3. Stability Core — cheaper, needs Marketplace subscription
       4. SVG placeholder — always works, zero cost
     """
-    # ── 1. Nova Canvas ────────────────────────────────────────
+    # ── 1. Pollinations.ai (free, no auth, no AWS) ───────────────────────────
     try:
-        data = _invoke_nova_canvas(prompt, width, height)
-        print(f"[bedrock] Nova Canvas OK ({len(data):,} bytes)")
+        data = _pollinations(prompt, width, height)
+        print(f"[bedrock] Pollinations.ai OK ({len(data):,} bytes)")
         return data
     except Exception as e:
-        print(f"[bedrock] Nova Canvas failed ({str(e)[:200]}) — trying Stability")
+        print(f"[bedrock] Pollinations.ai failed ({str(e)[:180]}) — trying Nova Canvas")
+
+    # ── 2. Nova Canvas (direct, then cross-region profile) ────────────────────
+    for canvas_id in ("amazon.nova-canvas-v1:0", "us.amazon.nova-canvas-v1:0"):
+        try:
+            data = _invoke_nova_canvas(prompt, width, height, model_id=canvas_id)
+            print(f"[bedrock] {canvas_id} OK ({len(data):,} bytes)")
+            return data
+        except Exception as e:
+            print(f"[bedrock] {canvas_id} failed ({str(e)[:180]}) — trying next")
 
     # ── 2 & 3. Stability AI ───────────────────────────────────
     for model_id in _STABILITY_MODELS:
