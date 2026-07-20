@@ -196,21 +196,27 @@ def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024)
 
 
 # ─── IMAGE 0 — FLUX.1-schnell via Hugging Face Gradio (free, no auth) ────────
-_FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
-_FLUX_TIMEOUT = 60  # seconds — Gradio spaces can be slow on cold start
+_FLUX_BASE    = "https://black-forest-labs-flux-1-schnell.hf.space"
+_FLUX_TIMEOUT = 120  # seconds — ZeroGPU spaces can queue
 
 
 def _flux_gradio(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
     """
-    Calls FLUX.1-schnell on HuggingFace Spaces via Gradio REST API.
+    Calls FLUX.1-schnell on HuggingFace Spaces via the modern Gradio REST API
+    (gradio_api/call/<fn> pattern — works on Gradio 4.x+ / ZeroGPU spaces).
     No API key required. Returns PNG bytes.
+
+    Protocol:
+      POST /gradio_api/call/infer  →  {"event_id": "..."}
+      GET  /gradio_api/call/infer/<event_id>  →  SSE stream
+           wait for  event: complete  then parse data line
     """
     # Clamp to FLUX supported range (multiples of 8)
     w = max(256, min(1024, (width  // 8) * 8))
     h = max(256, min(1024, (height // 8) * 8))
 
-    # Step 1: join the queue
-    queue_url = f"https://black-forest-labs-flux-1-schnell.hf.space/queue/join"
+    # ── Step 1: submit job ────────────────────────────────────────────────────
+    submit_url = f"{_FLUX_BASE}/gradio_api/call/infer"
     payload = json.dumps({
         "data": [
             prompt[:500],   # prompt
@@ -218,29 +224,27 @@ def _flux_gradio(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
             True,           # randomize_seed
             w,              # width
             h,              # height
-            4,              # num_inference_steps (4 is optimal for schnell)
-        ],
-        "event_data": None,
-        "fn_index": 0,
-        "trigger_id": 6,
-        "session_hash": base64.urlsafe_b64encode(os.urandom(8)).decode().rstrip("="),
+            4,              # num_inference_steps
+        ]
     }).encode()
 
     req = urllib.request.Request(
-        queue_url,
+        submit_url,
         data=payload,
         headers={"Content-Type": "application/json", "User-Agent": "StellarWorkflows/1.0"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
-        join_result = json.loads(resp.read())
+        submit_result = json.loads(resp.read())
 
-    event_id = join_result.get("event_id")
+    event_id = submit_result.get("event_id")
     if not event_id:
-        raise RuntimeError(f"FLUX Gradio: no event_id in join response: {join_result}")
+        raise RuntimeError(f"FLUX Gradio: no event_id in submit response: {submit_result}")
 
-    # Step 2: poll the SSE stream for the result
-    stream_url = f"https://black-forest-labs-flux-1-schnell.hf.space/queue/data?session_hash={join_result.get('session_hash', '')}"
+    print(f"[bedrock] FLUX.1-schnell queued — event_id={event_id}")
+
+    # ── Step 2: stream SSE until 'complete' ───────────────────────────────────
+    stream_url = f"{_FLUX_BASE}/gradio_api/call/infer/{event_id}"
     result_holder: list = []
     error_holder:  list = []
 
@@ -251,47 +255,45 @@ def _flux_gradio(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
                 headers={"Accept": "text/event-stream", "User-Agent": "StellarWorkflows/1.0"},
             )
             with urllib.request.urlopen(req2, timeout=_FLUX_TIMEOUT) as resp:
+                event_type = None
                 for raw_line in resp:
-                    line = raw_line.decode("utf-8").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data = json.loads(line[5:].strip())
-                    if data.get("msg") == "process_completed":
-                        result_holder.append(data)
+                    line = raw_line.decode("utf-8").rstrip("\n").rstrip("\r")
+                    if line.startswith("event:"):
+                        event_type = line[6:].strip()
+                    elif line.startswith("data:") and event_type == "complete":
+                        result_holder.append(json.loads(line[5:].strip()))
                         return
-                    if data.get("msg") == "queue_full":
-                        error_holder.append(RuntimeError("FLUX Gradio: queue full"))
+                    elif line.startswith("data:") and event_type == "error":
+                        error_holder.append(RuntimeError(f"FLUX Gradio stream error: {line[5:].strip()}"))
                         return
         except Exception as exc:
             error_holder.append(exc)
 
     t = threading.Thread(target=_stream, daemon=True)
     t.start()
-    t.join(timeout=_FLUX_TIMEOUT + 5)
+    t.join(timeout=_FLUX_TIMEOUT + 10)
 
     if t.is_alive():
-        raise TimeoutError(f"FLUX Gradio did not respond within {_FLUX_TIMEOUT}s")
+        raise TimeoutError(f"FLUX Gradio did not complete within {_FLUX_TIMEOUT}s")
     if error_holder:
         raise error_holder[0]
     if not result_holder:
-        raise RuntimeError("FLUX Gradio: stream ended without process_completed")
+        raise RuntimeError("FLUX Gradio: SSE stream ended without 'complete' event")
 
-    # Step 3: extract image — output is a file URL or base64
-    output = result_holder[0].get("output", {})
-    data_list = output.get("data", [])
+    # ── Step 3: extract image URL from result ─────────────────────────────────
+    # result is a list matching output components: [image, seed]
+    data_list = result_holder[0]
     if not data_list:
-        raise ValueError(f"FLUX Gradio: empty output data: {output}")
+        raise ValueError(f"FLUX Gradio: empty result data")
 
-    img_info = data_list[0]  # first output is the image
+    img_info = data_list[0]  # first output component is the image
 
-    # Could be {"url": "..."} or {"path": "..."} or a raw base64 string
     if isinstance(img_info, dict):
         img_url = img_info.get("url") or img_info.get("path")
         if not img_url:
             raise ValueError(f"FLUX Gradio: no url/path in image output: {img_info}")
-        # Make absolute if relative
         if img_url.startswith("/"):
-            img_url = f"https://black-forest-labs-flux-1-schnell.hf.space{img_url}"
+            img_url = f"{_FLUX_BASE}{img_url}"
         fetch_req = urllib.request.Request(img_url, headers={"User-Agent": "StellarWorkflows/1.0"})
         with urllib.request.urlopen(fetch_req, timeout=30) as img_resp:
             img_bytes = img_resp.read()
