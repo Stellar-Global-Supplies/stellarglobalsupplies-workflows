@@ -18,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from shared.bedrock_client  import generate_json, generate_text, generate_image
+from shared.bedrock_client  import generate_json, generate_text, generate_image, reset_cost_tracker, get_cost_summary
 from shared.supabase_client import get_client
 from shared.utils            import image_ext_and_type, upload_image_to_s3, upload_json_to_s3, now_iso, content_hash
 
@@ -201,6 +201,7 @@ Rules:
 # ─── HANDLER ─────────────────────────────────────────────────────────────────
 
 def handler(event, context):
+    reset_cost_tracker()
     post_type    = event.get("type", "product")
     prompt       = event.get("prompt", "")
     order        = event.get("order", {})
@@ -381,6 +382,22 @@ Return JSON with these exact keys:
     saved = db.insert("social_posts", row)
 
     print(f"[generate_post] DONE postId={saved['id']}")
+
+    # Write cost tracking to workflow_run
+    run_id = event.get("workflowRunId") or event.get("workflow_run_id")
+    if run_id:
+        try:
+            cost = get_cost_summary()
+            db.update("workflow_runs", {
+                "input_tokens":  cost["input_tokens"],
+                "output_tokens": cost["output_tokens"],
+                "image_count":   cost["image_count"],
+                "cost_usd":      cost["cost_usd"],
+            }, params=f"id=eq.{run_id}")
+            print(f"[generate_post] cost logged: ${cost['cost_usd']} ({cost['input_tokens']}in/{cost['output_tokens']}out tokens, {cost['image_count']} images)")
+        except Exception as e:
+            print(f"[generate_post] cost write failed: {e}")
+
     return {
         **event,
         "isDuplicate": False,

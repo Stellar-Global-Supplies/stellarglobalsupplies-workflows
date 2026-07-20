@@ -103,7 +103,17 @@ def handler(event, context):
         social_posts  = db.select("social_posts", params="select=status,type")
         blogs         = db.select("blog_posts",   params="select=status")
         pending_appr  = db.select("approval_queue", params="status=eq.pending&select=id,workflow_type")
-        workflow_runs = db.select("workflow_runs", params="select=id,workflow_type,status,started_at,completed_at,execution_arn&order=started_at.desc&limit=5")
+        workflow_runs = db.select("workflow_runs", params="select=id,workflow_type,status,started_at,completed_at,execution_arn,cost_usd,input_tokens,output_tokens,image_count&order=started_at.desc&limit=5")
+        cost_runs     = db.select("workflow_runs", params="select=workflow_type,cost_usd,input_tokens,output_tokens,image_count&status=eq.succeeded&order=started_at.desc&limit=200")
+
+        # Aggregate cost by workflow type
+        cost_by_type = {}
+        total_cost   = 0.0
+        for r in cost_runs:
+            wt   = r.get("workflow_type", "unknown")
+            cost = float(r.get("cost_usd") or 0)
+            cost_by_type[wt] = round(cost_by_type.get(wt, 0) + cost, 6)
+            total_cost += cost
 
         return ok({
             "leads": {
@@ -120,7 +130,11 @@ def handler(event, context):
                 "by_status":   _count_by(blogs, "status"),
             },
             "pending_approvals": len(pending_appr),
-            "workflow_runs": workflow_runs,
+            "workflow_runs":     workflow_runs,
+            "cost": {
+                "total_usd":    round(total_cost, 6),
+                "by_type":      cost_by_type,
+            },
         })
 
     return err("Unknown endpoint", 404)

@@ -7,7 +7,7 @@ import sys, os, uuid
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from shared.bedrock_client  import generate_json, generate_text, generate_image
+from shared.bedrock_client  import generate_json, generate_text, generate_image, reset_cost_tracker, get_cost_summary
 from shared.supabase_client import get_client
 from shared.utils            import image_ext_and_type, slugify, upload_image_to_s3, upload_json_to_s3, now_iso
 
@@ -71,6 +71,7 @@ Additional rules:
 
 
 def handler(event, context):
+    reset_cost_tracker()
     topic         = event.get("topic", "")
     keywords      = event.get("keywords", [])
     word_count    = event.get("word_count", 800)
@@ -168,6 +169,21 @@ Return valid JSON with these exact keys:
             insert_row = {k: v for k, v in insert_row.items() if k != missing}
 
     print(f"[generate_blog] DONE blogId={saved['id']}")
+
+    run_id = event.get("workflowRunId") or event.get("workflow_run_id")
+    if run_id:
+        try:
+            cost = get_cost_summary()
+            db.update("workflow_runs", {
+                "input_tokens":  cost["input_tokens"],
+                "output_tokens": cost["output_tokens"],
+                "image_count":   cost["image_count"],
+                "cost_usd":      cost["cost_usd"],
+            }, params=f"id=eq.{run_id}")
+            print(f"[generate_blog] cost logged: ${cost['cost_usd']}")
+        except Exception as e:
+            print(f"[generate_blog] cost write failed: {e}")
+
     return {
         **event,
         "blogId": saved["id"],

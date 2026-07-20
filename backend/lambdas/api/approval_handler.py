@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import boto3
 from shared.supabase_client import get_client
 from shared.utils import ok, err, now_iso, send_task_success, send_task_failure
+from shared.bedrock_client import generate_json, generate_text
 
 
 def _approval_id_from_event(event):
@@ -199,5 +200,119 @@ def handler(event, context):
             }, params=f"id=eq.{workflow_run_id}")
 
         return ok({"message": "Rejected", "approvalId": approval_id})
+
+    # ── REGENERATE ────────────────────────────────────────────────────────────
+    # POST /approvals/{id}/regenerate
+    # Body: { "feedback": "Too salesy, make it more factual" }
+    # Re-runs Bedrock with feedback appended, updates social_posts / blog_posts in place,
+    # updates the approval_queue payload so the reviewer sees fresh content.
+    if path.endswith("/regenerate"):
+        feedback = body.get("feedback", "").strip()
+        if not feedback:
+            return err("feedback is required")
+
+        payload  = item.get("payload", {})
+        post     = payload.get("post", {})
+        blog     = payload.get("blog", {})
+
+        if post:
+            # Regenerate social post content
+            existing_linkedin  = post.get("linkedin",  post.get("content", ""))
+            existing_facebook  = post.get("facebook",  "")
+            existing_instagram = post.get("instagram", "")
+            title              = post.get("title", "")
+
+            REGEN_SYSTEM = """You are a senior B2B marketing copywriter for Stellar Global Supplies.
+Rewrite the provided social media post content based on the reviewer's feedback.
+Return ONLY valid JSON with keys: linkedin, facebook, instagram.
+Keep the same product/topic but apply the feedback exactly.
+LinkedIn: 1500+ chars, structured paragraphs, no bullets, no em-dashes.
+Facebook/Instagram: under 300 chars with 3-5 hashtags."""
+
+            regen_prompt = f"""Original content:
+LINKEDIN: {existing_linkedin[:800]}
+FACEBOOK: {existing_facebook}
+INSTAGRAM: {existing_instagram}
+
+Reviewer feedback: {feedback}
+
+Rewrite all three platform versions applying this feedback exactly.
+Return JSON: {{ "linkedin": "...", "facebook": "...", "instagram": "..." }}"""
+
+            try:
+                regen = generate_json(regen_prompt, system=REGEN_SYSTEM, max_tokens=3000)
+            except Exception as e:
+                return err(f"Regeneration failed: {str(e)}", 500)
+
+            post_id = post.get("id") or payload.get("postId")
+            if post_id:
+                try:
+                    db.update("social_posts", {
+                        "linkedin":    regen.get("linkedin", existing_linkedin),
+                        "facebook":    regen.get("facebook", existing_facebook),
+                        "instagram":   regen.get("instagram", existing_instagram),
+                        "content":     (regen.get("facebook") or "")[:500],
+                        "caption":     (regen.get("facebook") or "")[:500],
+                        "raw_caption": (regen.get("facebook") or "")[:500],
+                    }, params=f"id=eq.{post_id}")
+                except Exception as e:
+                    print(f"[approval] regenerate post DB update failed: {e}")
+
+            # Update approval_queue payload with fresh content
+            new_payload = {**payload, "post": {**post, **regen, "linkedin": regen.get("linkedin", existing_linkedin)}}
+            db.update("approval_queue", {"payload": new_payload}, params=f"id=eq.{approval_id}")
+
+            return ok({
+                "message":  "Content regenerated",
+                "feedback": feedback,
+                "content":  regen,
+            })
+
+        elif blog:
+            existing_content = blog.get("content", "")
+            existing_title   = blog.get("title", "")
+            existing_excerpt = blog.get("excerpt", "")
+
+            BLOG_REGEN_SYSTEM = """You are a professional content writer for Stellar Global Supplies.
+Rewrite the blog post based on the reviewer's feedback.
+Return ONLY valid JSON with keys: title, excerpt, content (full markdown).
+Apply the feedback exactly while keeping the same topic and SEO value."""
+
+            regen_prompt = f"""Original blog:
+TITLE: {existing_title}
+EXCERPT: {existing_excerpt}
+CONTENT (first 1000 chars): {existing_content[:1000]}
+
+Reviewer feedback: {feedback}
+
+Rewrite the full blog applying this feedback.
+Return JSON: {{ "title": "...", "excerpt": "...", "content": "full markdown..." }}"""
+
+            try:
+                regen = generate_json(regen_prompt, system=BLOG_REGEN_SYSTEM, max_tokens=4000)
+            except Exception as e:
+                return err(f"Regeneration failed: {str(e)}", 500)
+
+            blog_id = blog.get("id") or payload.get("blogId")
+            if blog_id:
+                try:
+                    db.update("blog_posts", {
+                        "title":   regen.get("title",   existing_title),
+                        "excerpt": regen.get("excerpt", existing_excerpt),
+                        "content": regen.get("content", existing_content),
+                    }, params=f"id=eq.{blog_id}")
+                except Exception as e:
+                    print(f"[approval] regenerate blog DB update failed: {e}")
+
+            new_payload = {**payload, "blog": {**blog, **regen}}
+            db.update("approval_queue", {"payload": new_payload}, params=f"id=eq.{approval_id}")
+
+            return ok({
+                "message":  "Blog regenerated",
+                "feedback": feedback,
+                "content":  regen,
+            })
+
+        return err("No regeneratable content found in this approval")
 
     return err("Invalid action", 404)

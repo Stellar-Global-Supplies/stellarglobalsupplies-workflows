@@ -28,11 +28,14 @@ export const listApprovals = (status = 'pending', workflowType = '') => {
   return apiRequest('GET', `/approvals?${qs}`)
 }
 
-export const approveItem = (id, note = '', edits = {}) =>
+export const approveItem    = (id, note = '', edits = {}) =>
   apiRequest('POST', `/approvals/${id}/approve`, { note, edits })
 
-export const rejectItem = (id, note = '') =>
+export const rejectItem     = (id, note = '') =>
   apiRequest('POST', `/approvals/${id}/reject`, { note })
+
+export const regenerateItem = (id, feedback = '') =>
+  apiRequest('POST', `/approvals/${id}/regenerate`, { feedback })
 
 // ── Data ───────────────────────────────────────────────────
 export const getDashboard    = ()       => apiRequest('GET', '/data/dashboard')

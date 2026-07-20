@@ -617,6 +617,12 @@ resource "aws_apigatewayv2_route" "reject" {
   target    = "integrations/${aws_apigatewayv2_integration.approval_handler.id}"
 }
 
+resource "aws_apigatewayv2_route" "regenerate" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /approvals/{id}/regenerate"
+  target    = "integrations/${aws_apigatewayv2_integration.approval_handler.id}"
+}
+
 resource "aws_apigatewayv2_route" "data" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "GET /data/{proxy+}"

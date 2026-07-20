@@ -13,6 +13,34 @@ import urllib.request
 from typing import Optional
 from botocore.config import Config
 
+# ─── Per-invocation cost accumulator ─────────────────────────────────────────
+# Reset at start of each Lambda handler, read at the end to write to workflow_runs.
+# Nova Pro pricing (us-east-1) per 1K tokens
+_NOVA_INPUT_COST_PER_1K  = 0.0008
+_NOVA_OUTPUT_COST_PER_1K = 0.0032
+
+_run_tokens = {"input": 0, "output": 0, "images": 0}
+
+
+def reset_cost_tracker():
+    """Call at the start of each Lambda handler to zero counters."""
+    _run_tokens.update({"input": 0, "output": 0, "images": 0})
+
+
+def get_cost_summary() -> dict:
+    """Return token counts + estimated USD cost for this Lambda invocation."""
+    inp  = _run_tokens["input"]
+    out  = _run_tokens["output"]
+    imgs = _run_tokens["images"]
+    # FLUX via Gradio is free; cost is purely Bedrock Nova Pro text calls
+    cost = (inp / 1000 * _NOVA_INPUT_COST_PER_1K) + (out / 1000 * _NOVA_OUTPUT_COST_PER_1K)
+    return {
+        "input_tokens":  inp,
+        "output_tokens": out,
+        "image_count":   imgs,
+        "cost_usd":      round(cost, 6),
+    }
+
 # ─── boto3 clients (lazy-initialised, module-level singletons) ────────────────
 _bedrock_text  = None   # us-east-1 — Nova Pro text
 
@@ -48,6 +76,9 @@ def generate_text(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
     resp   = client.invoke_model(modelId=model_id, body=json.dumps(body),
                                  contentType="application/json", accept="application/json")
     result = json.loads(resp["body"].read())
+    usage  = result.get("usage", {})
+    _run_tokens["input"]  += usage.get("inputTokens",  0)
+    _run_tokens["output"] += usage.get("outputTokens", 0)
     return result["output"]["message"]["content"][0]["text"]
 
 
@@ -290,4 +321,6 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Option
     image_bytes = _flux_gradio(enhanced_prompt, width, height)
 
     # ── 2. Overlay company logo (top-right, full opacity) ─────────────────────
-    return _overlay_logo(image_bytes)
+    result = _overlay_logo(image_bytes)
+    _run_tokens["images"] += 1
+    return result
