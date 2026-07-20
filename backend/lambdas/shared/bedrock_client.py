@@ -1,30 +1,20 @@
 """
-Bedrock client — Nova Pro for text, Nova Canvas + Stability AI for images.
+Bedrock client — Nova Pro for text, FLUX.1-schnell via Gradio for images.
 
-Image fallback order:
-  1. FLUX.1-schnell via Gradio     — free, no auth, no AWS, fast (~10-20s)
-  2. amazon.nova-canvas-v1:0       — AWS-native, no Marketplace needed (legacy, needs prior use)
-  3. us.amazon.nova-canvas-v1:0    — cross-region inference profile variant
-  4. stability.sd3-5-large-v1:0    — best quality, ~$0.065/image (needs Marketplace)
-  5. stability.stable-image-core-v1:0 — cheaper,  ~$0.003/image (needs Marketplace)
-  6. Branded SVG placeholder        — zero cost, always works
-
-Nova Canvas uses the same us-east-1 client as Nova Pro text — no extra client needed.
-Stability models use a separate us-west-2 client.
+Text : Amazon Nova Pro (us-east-1)
+Image: Nova Pro enhances the prompt, then FLUX.1-schnell generates via HF Gradio (free, no auth)
 """
 import boto3
 import json
 import base64
 import os
-import random
 import threading
 import urllib.request
 from typing import Optional
 from botocore.config import Config
 
 # ─── boto3 clients (lazy-initialised, module-level singletons) ────────────────
-_bedrock_text  = None   # us-east-1 — Nova Pro text + Nova Canvas image
-_bedrock_image = None   # us-west-2 — Stability AI only
+_bedrock_text  = None   # us-east-1 — Nova Pro text
 
 _BOTO_CFG = Config(
     connect_timeout=10,
@@ -43,17 +33,6 @@ def _get_text_client():
         )
     return _bedrock_text
 
-
-def _get_image_client():
-    """us-west-2 client used only for Stability AI models."""
-    global _bedrock_image
-    if _bedrock_image is None:
-        _bedrock_image = boto3.client(
-            "bedrock-runtime",
-            region_name="us-west-2",
-            config=_BOTO_CFG,
-        )
-    return _bedrock_image
 
 
 # ─── TEXT — Amazon Nova Pro ───────────────────────────────────────────────────
@@ -89,128 +68,24 @@ def generate_json(prompt: str, system: str = "", max_tokens: int = 2000) -> dict
     raise ValueError(f"Nova returned invalid JSON after 2 attempts: {last_exc}") from last_exc
 
 
-# ─── IMAGE 1 — Amazon Nova Canvas (us-east-1, no Marketplace needed) ─────────
-def _invoke_nova_canvas(prompt: str, width: int = 1024, height: int = 1024, model_id: str = "amazon.nova-canvas-v1:0") -> bytes:
-    """
-    Nova Canvas request schema:
-      taskType / textToImageParams / imageGenerationConfig
-    Response: {"images": ["<base64>"], "error": null}
-    """
-    # Nova Canvas supports these exact sizes — clamp to nearest 64-multiple
-    w = max(320, min(4096, (width  // 64) * 64))
-    h = max(320, min(4096, (height // 64) * 64))
-
-    body = {
-        "taskType": "TEXT_IMAGE",
-        "textToImageParams": {
-            "text": prompt[:1024],          # hard cap per AWS docs
-        },
-        "imageGenerationConfig": {
-            "numberOfImages": 1,
-            "quality":        "standard",   # "standard" | "premium"
-            "width":          w,
-            "height":         h,
-            "seed":           random.randint(0, 858_993_459),
-        },
-    }
-    print(f"[bedrock] invoking {model_id} ({w}×{h})")
-    client = _get_text_client()                       # us-east-1, same as Nova Pro
-    resp   = client.invoke_model(
-        modelId      = model_id,
-        body         = json.dumps(body),
-        contentType  = "application/json",
-        accept       = "application/json",
-    )
-    result = json.loads(resp["body"].read())
-
-    if result.get("error"):
-        raise RuntimeError(f"Nova Canvas error: {result['error']}")
-
-    img_bytes = base64.b64decode(result["images"][0])
-    if len(img_bytes) < 1000:
-        raise ValueError(f"Nova Canvas returned suspiciously small image: {len(img_bytes)} bytes")
-    return img_bytes
-
-
-# ─── IMAGE 2 — Stability AI via Bedrock (us-west-2, needs Marketplace) ───────
-_STABILITY_MODELS = [
-    "stability.sd3-5-large-v1:0",           # best quality
-    "stability.stable-image-core-v1:0",     # cheaper fallback
-]
-
-
-def _invoke_stability(model_id: str, prompt: str) -> bytes:
-    client = _get_image_client()
-    body   = json.dumps({
-        "prompt":        prompt[:10000],
-        "mode":          "text-to-image",
-        "aspect_ratio":  "1:1",
-        "output_format": "png",
-    })
-    print(f"[bedrock] invoking {model_id}")
-    resp = client.invoke_model(
-        modelId     = model_id,
-        body        = body,
-        contentType = "application/json",
-        accept      = "application/json",
-    )
-    result    = json.loads(resp["body"].read())
-    img_bytes = base64.b64decode(result["images"][0])
-    if len(img_bytes) < 1000:
-        raise ValueError(f"Image too small: {len(img_bytes)} bytes")
-    return img_bytes
-
-
-# ─── IMAGE fallback — Branded SVG placeholder (always works) ─────────────────
-def _branded_svg_placeholder(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
-    label = (prompt[:58] + "…") if len(prompt) > 60 else prompt
-    for ch, esc in [("&","&amp;"),("<","&lt;"),(">","&gt;"),("\"","&quot;")]:
-        label = label.replace(ch, esc)
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%"   stop-color="#0A2547"/>
-      <stop offset="100%" stop-color="#1565C0"/>
-    </linearGradient>
-  </defs>
-  <rect width="{width}" height="{height}" fill="url(#bg)"/>
-  <rect x="40" y="40" width="{width-80}" height="{height-80}" rx="16"
-        fill="none" stroke="#F59E0B" stroke-width="2" opacity="0.4"/>
-  <circle cx="{width//2}" cy="{height//2 - 80}" r="54" fill="#F59E0B" opacity="0.15"/>
-  <text x="{width//2}" y="{height//2 - 58}"
-        font-family="Arial,sans-serif" font-size="64" font-weight="bold"
-        fill="#F59E0B" text-anchor="middle">S</text>
-  <text x="{width//2}" y="{height//2 + 10}"
-        font-family="Arial,sans-serif" font-size="22" font-weight="600"
-        fill="#FFFFFF" text-anchor="middle">Stellar Global Supplies</text>
-  <text x="{width//2}" y="{height//2 + 46}"
-        font-family="Arial,sans-serif" font-size="13"
-        fill="#94A3B8" text-anchor="middle">{label}</text>
-  <rect x="{width//2 - 52}" y="{height//2 + 72}" width="104" height="26" rx="13"
-        fill="#F59E0B" opacity="0.18"/>
-  <text x="{width//2}" y="{height//2 + 90}"
-        font-family="Arial,sans-serif" font-size="11" font-weight="500"
-        fill="#F59E0B" text-anchor="middle">AI · Placeholder</text>
-</svg>"""
-    return svg.encode("utf-8")
-
 
 # ─── IMAGE PROMPT ENHANCER — Nova Pro rewrites prompt for FLUX ───────────────
-_ENHANCE_SYSTEM = """You are an expert image prompt engineer for FLUX.1, a state-of-the-art text-to-image model.
-Your job is to rewrite a short product/scene description into a rich, detailed FLUX prompt that produces
-professional, photorealistic images with proper backgrounds, lighting, and composition.
+_ENHANCE_SYSTEM = """You are a product photography prompt writer for Stellar Global Supplies — a Pune-based B2B industrial materials supplier specialising in Stainless Steel (SS), Mild Steel (MS), and Fastening products (bolts, nuts, washers, circlips).
 
-Rules:
-- Always include: subject details, background/environment, lighting style, camera angle, mood/atmosphere
-- For product shots: use studio or lifestyle backgrounds, never plain white unless asked
-- Keep it under 200 words
-- Output ONLY the enhanced prompt — no explanation, no preamble, no quotes"""
+Your job: rewrite a short product name or description into a concise, sharp FLUX image generation prompt that produces a professional industrial product catalogue photo.
 
-_ENHANCE_USER = """Rewrite this into a detailed FLUX image generation prompt:
+Style rules:
+- Clean industrial background: dark grey workshop floor, brushed metal surface, or concrete — never plain white
+- Soft directional studio lighting highlighting the material's texture (metallic sheen, mill finish, zinc coat etc.)
+- Slight shallow depth of field, product in sharp focus
+- No people, no text, no logos
+- Photorealistic, commercial catalogue quality
+- Keep prompt under 120 words
+- Output ONLY the prompt — no explanation, no preamble"""
 
-\"{prompt}\"
+_ENHANCE_USER = """Product: \"{prompt}\"
 
-Enhanced prompt:"""
+Write the FLUX prompt:"""
 
 
 def _enhance_prompt(prompt: str) -> str:
@@ -342,46 +217,74 @@ def _flux_gradio(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
     return img_bytes
 
 
-# ─── PUBLIC API ───────────────────────────────────────────────────────────────
+# ─── LOGO OVERLAY ────────────────────────────────────────────────────────────
+# Path to the Stellar Global Supplies logo (PNG, placed at deployment root).
+# Change this env var or constant to point to wherever the logo lives on disk.
+_LOGO_PATH = os.environ.get(
+    "STELLAR_LOGO_PATH",
+    os.path.join(os.path.dirname(__file__), "logo.png"),
+)
+
+# Logo width as a fraction of the generated image width (15% feels clean)
+_LOGO_WIDTH_RATIO = 0.15
+# Padding from the top-right corner in pixels
+_LOGO_PADDING = 18
+
+
+def _overlay_logo(image_bytes: bytes) -> bytes:
+    """
+    Composite the Stellar Global Supplies logo onto the top-right corner
+    of the generated image. Returns PNG bytes.
+    Falls back to the original bytes if the logo file is missing or PIL fails.
+    """
+    try:
+        from PIL import Image as PILImage
+        import io
+
+        if not os.path.exists(_LOGO_PATH):
+            print(f"[bedrock] logo not found at {_LOGO_PATH} — skipping overlay")
+            return image_bytes
+
+        # Load generated image
+        base = PILImage.open(io.BytesIO(image_bytes)).convert("RGBA")
+        bw, bh = base.size
+
+        # Load & resize logo proportionally
+        logo = PILImage.open(_LOGO_PATH).convert("RGBA")
+        target_w = max(80, int(bw * _LOGO_WIDTH_RATIO))
+        ratio     = target_w / logo.width
+        target_h  = int(logo.height * ratio)
+        logo      = logo.resize((target_w, target_h), PILImage.LANCZOS)
+
+        # Top-right position
+        x = bw - target_w - _LOGO_PADDING
+        y = _LOGO_PADDING
+
+        # Paste using logo's alpha channel as mask
+        base.paste(logo, (x, y), mask=logo)
+
+        # Convert back to PNG bytes
+        out = io.BytesIO()
+        base.convert("RGB").save(out, format="PNG")
+        print(f"[bedrock] logo overlaid at top-right ({target_w}×{target_h}px)")
+        return out.getvalue()
+
+    except Exception as e:
+        print(f"[bedrock] logo overlay failed ({e}) — returning image without logo")
+        return image_bytes
+
+
+
 def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> Optional[bytes]:
     """
-    Returns image bytes (PNG or SVG).
-
-    Fallback order:
-      1. FLUX.1-schnell — free, no auth, fast via Gradio
-      2. Nova Canvas    — AWS-native, no Marketplace needed
-      3. Stability SD3  — best quality, needs Marketplace subscription
-      4. Stability Core — cheaper, needs Marketplace subscription
-      5. SVG placeholder — always works, zero cost
+    Returns image bytes (PNG).
+    Enhances prompt with Nova Pro, then generates via FLUX.1-schnell on Gradio.
     """
-    # ── 0. Enhance prompt with Nova Pro before any image model ────────────────
+    # ── 0. Enhance prompt with Nova Pro ───────────────────────────────────────
     enhanced_prompt = _enhance_prompt(prompt)
 
-    # ── 1. FLUX.1-schnell via Gradio (free, no auth) ─────────────────────────
-    try:
-        data = _flux_gradio(enhanced_prompt, width, height)
-        return data
-    except Exception as e:
-        print(f"[bedrock] FLUX.1-schnell Gradio failed ({str(e)[:180]}) — trying Nova Canvas")
+    # ── 1. FLUX.1-schnell via Gradio ─────────────────────────────────────────
+    image_bytes = _flux_gradio(enhanced_prompt, width, height)
 
-    # ── 2. Nova Canvas (direct, then cross-region profile) ────────────────────
-    for canvas_id in ("amazon.nova-canvas-v1:0", "us.amazon.nova-canvas-v1:0"):
-        try:
-            data = _invoke_nova_canvas(enhanced_prompt, width, height, model_id=canvas_id)
-            print(f"[bedrock] {canvas_id} OK ({len(data):,} bytes)")
-            return data
-        except Exception as e:
-            print(f"[bedrock] {canvas_id} failed ({str(e)[:180]}) — trying next")
-
-    # ── 3 & 4. Stability AI ───────────────────────────────────────────────────
-    for model_id in _STABILITY_MODELS:
-        try:
-            data = _invoke_stability(model_id, enhanced_prompt)
-            print(f"[bedrock] {model_id} OK ({len(data):,} bytes)")
-            return data
-        except Exception as e:
-            print(f"[bedrock] {model_id} failed ({str(e)[:200]}) — trying next")
-
-    # ── 4. SVG placeholder ────────────────────────────────────
-    print("[bedrock] all image models failed — using branded SVG placeholder")
-    return _branded_svg_placeholder(prompt, width, height)
+    # ── 2. Overlay company logo (top-right, full opacity) ─────────────────────
+    return _overlay_logo(image_bytes)
