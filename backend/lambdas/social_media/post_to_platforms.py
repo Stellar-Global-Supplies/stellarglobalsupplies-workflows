@@ -337,14 +337,17 @@ def handler(event, context):
     success_count = sum(1 for r in results.values() if r.get("success"))
     total_count   = len(results)
 
+    # Status vocabulary must match social_posts_status_check constraint:
+    # pending_approval | approved_manual | publishing | published |
+    # rejected | publish_failed | partial | failed
     if total_count == 0:
-        overall_status = "posted"
+        overall_status = "published"
     elif success_count == total_count:
-        overall_status = "posted"
+        overall_status = "published"
     elif success_count > 0:
         overall_status = "partial"
     else:
-        overall_status = "failed"
+        overall_status = "publish_failed"
 
     db  = get_client()
     now = now_iso()
