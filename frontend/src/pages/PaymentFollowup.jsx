@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { triggerWorkflow, getOrders } from '../services/api'
+import { startWorkflow, getOrders } from '../services/api'
 import { PageHeader, EmptyState, Skeleton } from '../components/ui'
 import {
   CreditCard, AlertTriangle, CheckCircle, Clock, Send,
@@ -169,7 +169,7 @@ export default function PaymentFollowup() {
   async function handleTrigger(order) {
     setTriggering(order.id)
     try {
-      await triggerWorkflow('payment-followup', { orderId: order.id })
+      await startWorkflow('payment-followup', { orderId: order.id })
       toast.success(`Follow-up email drafted for ${order.customer_name} — check Approval Queue`)
       qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
     } catch (e) {
