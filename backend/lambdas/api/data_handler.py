@@ -73,14 +73,21 @@ def handler(event, context):
         params = "order=created_at.desc"
         
         # Support filtering by payment_status
+        # Check if value already contains a PostgREST operator (eq., neq., gt., lt., etc.)
         payment_status = qs.get("payment_status", "")
         if payment_status:
-            params += f"&payment_status=eq.{payment_status}"
+            if any(payment_status.startswith(op) for op in ('eq.', 'neq.', 'gt.', 'gte.', 'lt.', 'lte.', 'like.', 'ilike.')):
+                params += f"&payment_status={payment_status}"
+            else:
+                params += f"&payment_status=eq.{payment_status}"
         
         # Support filtering by status (order status)
         order_status = qs.get("status", "")
         if order_status:
-            params += f"&status=eq.{order_status}"
+            if any(order_status.startswith(op) for op in ('eq.', 'neq.', 'gt.', 'gte.', 'lt.', 'lte.', 'like.', 'ilike.')):
+                params += f"&status={order_status}"
+            else:
+                params += f"&status=eq.{order_status}"
         
         # Add limit and offset
         params += f"&limit={limit}&offset={offset}"
