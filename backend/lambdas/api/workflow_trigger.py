@@ -21,6 +21,7 @@ STATE_MACHINES = {
     "social-product":  f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}social-product",
     "social-tech":     f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}social-tech",
     "blog":            f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}blog-post",
+    "payment-followup": f"arn:aws:states:{os.environ.get('AWS_REGION', 'us-east-1')}:{boto3.client('sts').get_caller_identity()['Account']}:stateMachine:{SF_PREFIX}payment-followup",
 }
 
 
