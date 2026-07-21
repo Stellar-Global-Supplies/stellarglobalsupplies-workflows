@@ -68,6 +68,26 @@ def handler(event, context):
         }, None)
         return ok(order)
 
+    if "/data/orders" in path:
+        # Build query parameters for orders table
+        params = "order=created_at.desc"
+        
+        # Support filtering by payment_status
+        payment_status = qs.get("payment_status", "")
+        if payment_status:
+            params += f"&payment_status=eq.{payment_status}"
+        
+        # Support filtering by status (order status)
+        order_status = qs.get("status", "")
+        if order_status:
+            params += f"&status=eq.{order_status}"
+        
+        # Add limit and offset
+        params += f"&limit={limit}&offset={offset}"
+        
+        rows = db.select("orders", params=params)
+        return ok({"orders": rows, "count": len(rows)})
+
     if "/data/leads" in path:
         params = with_filters("order=created_at.desc", status)
         rows   = db.select("leads", params=params)
