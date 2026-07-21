@@ -8,6 +8,7 @@ Returns a list of orders so Step Functions can Map over them,
 or a single order when order_id is provided.
 """
 import sys, os
+import urllib.parse
 sys.path.insert(0, "/opt/python")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -42,9 +43,10 @@ def handler(event, context):
         }
 
     # Batch — all overdue orders (for EventBridge / manual batch trigger)
+    payment_status_filter = urllib.parse.quote("After 30 days", safe='')
     rows = db.select(
         "orders",
-        params="payment_status=eq.After 30 days&order=created_at.asc&limit=50"
+        params=f"payment_status=eq.{payment_status_filter}&order=created_at.asc&limit=50"
     )
     print(f"[fetch_overdue_orders] batch: found {len(rows)} overdue orders")
     return {

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import boto3
 import json
 import re
+import urllib.parse
 from shared.supabase_client import get_client
 from shared.utils import ok, err, read_json_from_s3
 from social_media.get_orders import handler as get_orders_handler
@@ -77,17 +78,25 @@ def handler(event, context):
         payment_status = qs.get("payment_status", "")
         if payment_status:
             if any(payment_status.startswith(op) for op in ('eq.', 'neq.', 'gt.', 'gte.', 'lt.', 'lte.', 'like.', 'ilike.')):
-                params += f"&payment_status={payment_status}"
+                # Value already has operator, split and encode the value part
+                operator = payment_status[:payment_status.index('.')+1]
+                value = urllib.parse.quote(payment_status[payment_status.index('.')+1:], safe='')
+                params += f"&payment_status={operator}{value}"
             else:
-                params += f"&payment_status=eq.{payment_status}"
+                # No operator, add eq. and URL-encode the value
+                params += f"&payment_status=eq.{urllib.parse.quote(payment_status, safe='')}"
         
         # Support filtering by status (order status)
         order_status = qs.get("status", "")
         if order_status:
             if any(order_status.startswith(op) for op in ('eq.', 'neq.', 'gt.', 'gte.', 'lt.', 'lte.', 'like.', 'ilike.')):
-                params += f"&status={order_status}"
+                # Value already has operator, split and encode the value part
+                operator = order_status[:order_status.index('.')+1]
+                value = urllib.parse.quote(order_status[order_status.index('.')+1:], safe='')
+                params += f"&status={operator}{value}"
             else:
-                params += f"&status=eq.{order_status}"
+                # No operator, add eq. and URL-encode the value
+                params += f"&status=eq.{urllib.parse.quote(order_status, safe='')}"
         
         # Add limit and offset
         params += f"&limit={limit}&offset={offset}"
