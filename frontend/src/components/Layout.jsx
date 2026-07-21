@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { listApprovals } from '../services/api'
 import {
   LayoutDashboard, Users, Share2, Code2, FileText,
-  CheckSquare, History, LogOut, Menu, X, Bell, Activity, CalendarClock, Layers
+  CheckSquare, History, LogOut, Menu, X, Bell, Activity, CalendarClock, Layers, CreditCard
 } from 'lucide-react'
 
 const NAV = [
@@ -17,7 +17,8 @@ const NAV = [
   { to: '/content',   icon: Layers,          label: 'Content' },
   { to: '/approvals', icon: CheckSquare,     label: 'Approvals', badge: true },
   { to: '/workflow-runs', icon: Activity,    label: 'Workflow Runs' },
-  { to: '/schedules', icon: CalendarClock,   label: 'Schedules' },
+  { to: '/schedules',        icon: CalendarClock, label: 'Schedules' },
+  { to: '/payment-followup', icon: CreditCard,    label: 'Payment Follow-up' },
   { to: '/history',   icon: History,         label: 'History' },
 ]
 

@@ -5,18 +5,19 @@ import { PageHeader, StatusBadge, EmptyState, Modal, Spinner } from '../componen
 import {
   CheckSquare, Check, X, Eye, Mail, Share2, FileText, Code2,
   RefreshCw, Users, Pencil, Send, Linkedin, Facebook, Instagram,
-  RotateCcw, MessageSquare, Sparkles, ChevronRight, Monitor
+  RotateCcw, MessageSquare, Sparkles, ChevronRight, Monitor, CreditCard
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
 const WF_META = {
-  lead_approval:  { label: 'Lead Approval',   icon: Users,    color: 'text-emerald-600', bg: 'bg-emerald-50' },
-  lead_email:     { label: 'Email Outreach',  icon: Mail,     color: 'text-blue-600',    bg: 'bg-blue-50' },
-  lead_followup:  { label: 'Follow-up Email', icon: Mail,     color: 'text-indigo-600',  bg: 'bg-indigo-50' },
-  social_product: { label: 'Product Post',    icon: Share2,   color: 'text-navy',        bg: 'bg-navy/5' },
-  social_tech:    { label: 'Tech Post',       icon: Code2,    color: 'text-amber-600',   bg: 'bg-amber-50' },
-  blog:           { label: 'Blog Post',       icon: FileText, color: 'text-purple-600',  bg: 'bg-purple-50' },
+  lead_approval:    { label: 'Lead Approval',      icon: Users,    color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  lead_email:       { label: 'Email Outreach',     icon: Mail,     color: 'text-blue-600',    bg: 'bg-blue-50' },
+  lead_followup:    { label: 'Follow-up Email',    icon: Mail,     color: 'text-indigo-600',  bg: 'bg-indigo-50' },
+  social_product:   { label: 'Product Post',       icon: Share2,   color: 'text-navy',        bg: 'bg-navy/5' },
+  social_tech:      { label: 'Tech Post',          icon: Code2,    color: 'text-amber-600',   bg: 'bg-amber-50' },
+  blog:             { label: 'Blog Post',          icon: FileText, color: 'text-purple-600',  bg: 'bg-purple-50' },
+  payment_followup: { label: 'Payment Follow-up',  icon: CreditCard, color: 'text-red-600',  bg: 'bg-red-50' },
 }
 
 // ─── Platform previews ────────────────────────────────────────────────────────

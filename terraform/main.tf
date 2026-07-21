@@ -413,7 +413,8 @@ locals {
     WEBSITE_BLOG_DIR          = "content/blog"
     EVENTS_ROLE_ARN           = aws_iam_role.events_sfn.arn
     HUNTER_API_KEY_PARAM      = "/${var.project_name}/hunter/api_key"
-    LINKEDIN_NOTIFY_EMAILS    = var.linkedin_notify_emails
+    LINKEDIN_NOTIFY_EMAILS             = var.linkedin_notify_emails
+    SEND_PAYMENT_EMAIL_FUNCTION_NAME   = "${local.prefix}-send-payment-email"
   }
 
   lambdas = {
@@ -435,6 +436,11 @@ locals {
     approval-handler    = { handler = "api.approval_handler.handler", source = "../backend/lambdas" }
     data-handler        = { handler = "api.data_handler.handler", source = "../backend/lambdas" }
     schedule-handler    = { handler = "api.schedule_handler.handler", source = "../backend/lambdas" }
+    # Payment follow-up workflow
+    fetch-overdue-orders       = { handler = "payment_followup.fetch_overdue_orders.handler", source = "../backend/lambdas" }
+    draft-payment-email        = { handler = "payment_followup.draft_payment_email.handler", source = "../backend/lambdas" }
+    create-payment-approval    = { handler = "payment_followup.create_payment_approval.handler", source = "../backend/lambdas" }
+    send-payment-email         = { handler = "payment_followup.send_payment_email.handler", source = "../backend/lambdas" }
   }
 }
 
@@ -491,6 +497,10 @@ locals {
     ReadS3ContextArn    = aws_lambda_function.functions["read-s3-context"].arn
     GenerateBlogArn     = aws_lambda_function.functions["generate-blog"].arn
     CreateGitHubPRArn   = aws_lambda_function.functions["create-github-pr"].arn
+    # Payment follow-up
+    FetchOverdueOrdersArn    = aws_lambda_function.functions["fetch-overdue-orders"].arn
+    DraftPaymentEmailArn     = aws_lambda_function.functions["draft-payment-email"].arn
+    CreatePaymentApprovalArn = aws_lambda_function.functions["create-payment-approval"].arn
   }
 }
 
@@ -522,6 +532,12 @@ resource "aws_sfn_state_machine" "blog_post" {
   name       = "${local.prefix}-blog-post"
   role_arn   = aws_iam_role.sfn_exec.arn
   definition = templatefile("${path.module}/../backend/step_functions/blog_post.json", local.sf_substitutions)
+}
+
+resource "aws_sfn_state_machine" "payment_followup" {
+  name       = "${local.prefix}-payment-followup"
+  role_arn   = aws_iam_role.sfn_exec.arn
+  definition = templatefile("${path.module}/../backend/step_functions/payment_followup.json", local.sf_substitutions)
 }
 
 # Update lambda envs with SF ARNs (circular dep resolved by targeting)

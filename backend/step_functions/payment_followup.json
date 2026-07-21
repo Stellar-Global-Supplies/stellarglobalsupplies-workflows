@@ -1,0 +1,44 @@
+{
+  "Comment": "Payment follow-up workflow: fetch overdue order → draft email with AI → create approval → wait → send email on approval",
+  "StartAt": "FetchOverdueOrder",
+  "States": {
+    "FetchOverdueOrder": {
+      "Type": "Task",
+      "Resource": "${FetchOverdueOrdersArn}",
+      "ResultPath": "$",
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException","Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error" }],
+      "Next": "DraftPaymentEmail"
+    },
+    "DraftPaymentEmail": {
+      "Type": "Task",
+      "Resource": "${DraftPaymentEmailArn}",
+      "ResultPath": "$",
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException","Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error" }],
+      "Next": "CreatePaymentApproval"
+    },
+    "CreatePaymentApproval": {
+      "Type": "Task",
+      "Resource": "${CreatePaymentApprovalArn}",
+      "ResultPath": "$",
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 2, "MaxAttempts": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error" }],
+      "Next": "WaitForApproval"
+    },
+    "WaitForApproval": {
+      "Type": "Wait",
+      "Comment": "Approval is handled via the API — approval_handler calls send_payment_email directly on approve. Step Functions marks success here.",
+      "Seconds": 1,
+      "Next": "WorkflowSucceeded"
+    },
+    "WorkflowSucceeded": {
+      "Type": "Succeed"
+    },
+    "WorkflowFailed": {
+      "Type": "Fail",
+      "Error": "PaymentFollowupFailed",
+      "Cause": "See error field in execution input for details"
+    }
+  }
+}

@@ -42,6 +42,7 @@ export const getDashboard    = ()       => apiRequest('GET', '/data/dashboard')
 export const getLeads        = (qs='')  => apiRequest('GET', `/data/leads?${qs}`)
 export const getSocialPosts  = (qs='')  => apiRequest('GET', `/data/social-posts?${qs}`)
 export const getBlogPosts    = (qs='')  => apiRequest('GET', `/data/blog-posts?${qs}`)
+export const getOrders       = (qs='')  => apiRequest('GET', `/data/orders?${qs}`)
 export const getWorkflowRuns = (qs='')  => apiRequest('GET', `/data/workflow-runs?${qs}`)
 export const getGeneratedContent = (key) => apiRequest('GET', `/data/content?key=${encodeURIComponent(key)}`)
 export const lookupOrder = (orderId = '', productType = '') =>

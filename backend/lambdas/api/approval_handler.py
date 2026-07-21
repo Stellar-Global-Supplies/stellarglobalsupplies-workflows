@@ -26,7 +26,7 @@ def _approval_id_from_event(event):
     if approval_id:
         return approval_id
     raw_path = event.get("rawPath") or event.get("path") or ""
-    match = re.search(r"/approvals/([^/]+)/(approve|reject)$", raw_path)
+    match = re.search(r"/approvals/([^/]+)/(approve|reject|regenerate)$", raw_path)
     return match.group(1) if match else None
 
 
@@ -130,20 +130,42 @@ def handler(event, context):
 
         # Gate 1 — Save
         if approval_gate == "save":
-            try:
-                send_task_success(item["task_token"], {"approved": True, "note": reviewer_note, **edited_payload})
-            except Exception as e:
-                if "TaskTimedOut" in str(e) or "InvalidToken" in str(e):
-                    db.update("approval_queue", {"status": "expired"}, params=f"id=eq.{approval_id}")
-                    return err("Approval token expired — workflow timed out", 410)
-                raise
-            # Set post to approved_manual (ready to publish from Content page)
-            post_id = payload.get("postId") or (payload.get("post") or {}).get("id")
-            if post_id and wf_type in ("social_tech", "social_product"):
+            # ── Payment follow-up: send email directly (no task token) ────────
+            if wf_type == "payment_followup":
+                order      = edited_payload.get("order", {})
+                email_data = edited_payload.get("email", {})
+                # Apply any edits the reviewer made to subject/body
+                if edits.get("email"):
+                    email_data = {**email_data, **edits["email"]}
                 try:
-                    db.update("social_posts", {"status": "approved_manual"}, params=f"id=eq.{post_id}")
+                    lambda_client = boto3.client("lambda")
+                    lambda_client.invoke(
+                        FunctionName=os.environ.get("SEND_PAYMENT_EMAIL_FUNCTION_NAME", "send-payment-email"),
+                        InvocationType="RequestResponse",
+                        Payload=json.dumps({
+                            "order":      order,
+                            "email":      email_data,
+                            "approvalId": approval_id,
+                        }).encode(),
+                    )
+                    print(f"[approval] payment email sent for approval={approval_id}")
                 except Exception as e:
-                    print(f"[approval] could not update post status: {e}")
+                    return err(f"Failed to send payment email: {str(e)}", 500)
+            else:
+                try:
+                    send_task_success(item["task_token"], {"approved": True, "note": reviewer_note, **edited_payload})
+                except Exception as e:
+                    if "TaskTimedOut" in str(e) or "InvalidToken" in str(e):
+                        db.update("approval_queue", {"status": "expired"}, params=f"id=eq.{approval_id}")
+                        return err("Approval token expired — workflow timed out", 410)
+                    raise
+                # Set post to approved_manual (ready to publish from Content page)
+                post_id = payload.get("postId") or (payload.get("post") or {}).get("id")
+                if post_id and wf_type in ("social_tech", "social_product"):
+                    try:
+                        db.update("social_posts", {"status": "approved_manual"}, params=f"id=eq.{post_id}")
+                    except Exception as e:
+                        print(f"[approval] could not update post status: {e}")
 
         # Gate 2 — Publish
         elif approval_gate == "publish":

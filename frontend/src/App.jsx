@@ -9,9 +9,10 @@ import TechPost    from './pages/TechPost'
 import BlogPost    from './pages/BlogPost'
 import Approvals   from './pages/ApprovalQueue'
 import Content     from './pages/Content'
-import WorkflowRuns from './pages/WorkflowRuns'
-import History     from './pages/History'
-import Schedules   from './pages/Schedules'
+import WorkflowRuns   from './pages/WorkflowRuns'
+import History        from './pages/History'
+import Schedules      from './pages/Schedules'
+import PaymentFollowup from './pages/PaymentFollowup'
 
 function Guard({ children }) {
   const { user, loading } = useAuth()
@@ -42,7 +43,8 @@ export default function App() {
             <Route path="content"       element={<Content />} />
             <Route path="workflow-runs" element={<WorkflowRuns />} />
             <Route path="history"   element={<History />} />
-            <Route path="schedules" element={<Schedules />} />
+            <Route path="schedules"        element={<Schedules />} />
+            <Route path="payment-followup" element={<PaymentFollowup />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
