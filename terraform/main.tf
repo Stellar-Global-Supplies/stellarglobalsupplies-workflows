@@ -415,6 +415,8 @@ locals {
     HUNTER_API_KEY_PARAM      = "/${var.project_name}/hunter/api_key"
     LINKEDIN_NOTIFY_EMAILS             = var.linkedin_notify_emails
     SEND_PAYMENT_EMAIL_FUNCTION_NAME   = "${local.prefix}-send-payment-email"
+    REVIEWER_EMAIL_PARAM               = "/${var.project_name}/approval/reviewer_email"
+    API_BASE_URL                       = var.api_base_url
   }
 
   lambdas = {
@@ -637,6 +639,23 @@ resource "aws_apigatewayv2_route" "regenerate" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /approvals/{id}/regenerate"
   target    = "integrations/${aws_apigatewayv2_integration.approval_handler.id}"
+}
+
+resource "aws_apigatewayv2_route" "email_action" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /approvals/{id}/email-action"
+  target    = "integrations/${aws_apigatewayv2_integration.approval_handler.id}"
+}
+
+# Reviewer email SSM parameter
+# Set value manually after apply:
+#   aws ssm put-parameter --name /stellar-wf/approval/reviewer_email \
+#     --value "your@email.com" --type SecureString --overwrite
+resource "aws_ssm_parameter" "reviewer_email" {
+  name  = "/${var.project_name}/approval/reviewer_email"
+  type  = "SecureString"
+  value = var.reviewer_email != "" ? var.reviewer_email : "placeholder@example.com"
+  lifecycle { ignore_changes = [value] }
 }
 
 resource "aws_apigatewayv2_route" "data" {

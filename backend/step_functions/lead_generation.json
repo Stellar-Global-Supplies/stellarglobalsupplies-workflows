@@ -50,8 +50,8 @@
         }
       },
       "ResultPath": "$.approvalResult",
-      "TimeoutSeconds": 604800,
-      "HeartbeatSeconds": 86400,
+      "TimeoutSeconds": 3600,
+      "HeartbeatSeconds": 3000,
       "Catch": [
         {
           "ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"],

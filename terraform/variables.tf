@@ -81,3 +81,15 @@ variable "linkedin_notify_emails" {
   type        = string
   default     = "workwithprasadbhavsar@gmail.com,stellarglobalsupplies@gmail.com"
 }
+
+variable "reviewer_email" {
+  description = "Email address to receive approval notifications with one-click approve/reject links. Set via SSM after apply."
+  type        = string
+  default     = "workwithprasadbhavsar@gmail.com,stellarglobalsupplies@gmail.com"
+}
+
+variable "api_base_url" {
+  description = "Base URL of the API Gateway e.g. https://api.stellarglobalsupplies.com — used to build approve/reject links in emails"
+  type        = string
+  default     = "https://b01fy4ek14.execute-api.us-east-1.amazonaws.com"
+}
