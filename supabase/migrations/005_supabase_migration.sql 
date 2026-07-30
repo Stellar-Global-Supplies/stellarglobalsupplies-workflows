@@ -1,0 +1,77 @@
+-- Phase 2 Migration
+-- Run this in Supabase → SQL Editor before deploying Workers
+
+-- ── 1. job_queue table ───────────────────────────────────────────────────────
+-- Replaces Step Functions state machines entirely.
+-- Every workflow step is a row. Job runner picks oldest pending row, runs it,
+-- inserts next row, marks current done. Dies.
+
+create table if not exists job_queue (
+  id               uuid primary key default gen_random_uuid(),
+  workflow_run_id  uuid references workflow_runs(id) on delete cascade,
+  workflow_type    text not null,
+  step_name        text not null,
+  status           text not null default 'pending'
+                   check (status in ('pending','running','done','failed','waiting_for_approval','retry')),
+  payload          jsonb not null default '{}',
+  retry_count      int  not null default 0,
+  error_msg        text,
+  created_at       timestamptz not null default now(),
+  picked_up_at     timestamptz,
+  completed_at     timestamptz
+);
+
+-- Index for job runner: oldest pending job first
+create index if not exists idx_job_queue_pending
+  on job_queue (status, created_at asc)
+  where status = 'pending';
+
+-- Index for looking up jobs by workflow run
+create index if not exists idx_job_queue_run
+  on job_queue (workflow_run_id);
+
+-- RLS: service key bypasses, anon cannot touch this table
+alter table job_queue enable row level security;
+
+create policy "service key full access" on job_queue
+  using (true) with check (true);
+
+
+-- ── 2. workflow_schedules — add cron_utc and last_run_at columns ─────────────
+-- Replaces EventBridge rule storage.
+-- cron_utc: CF/unix cron format (min hour dom month dow), stored in UTC.
+-- Schedule runner reads this to know when to fire.
+
+alter table workflow_schedules
+  add column if not exists cron_utc    text,
+  add column if not exists last_run_at timestamptz;
+
+-- Backfill cron_utc for existing schedules (basic monthly default)
+-- After running this, edit any schedules in the UI to regenerate proper cron
+update workflow_schedules
+set cron_utc = '30 3 1 * *'  -- 09:00 IST = 03:30 UTC, 1st of month
+where cron_utc is null;
+
+
+-- ── 3. workflow_runs — add awaiting_approval status if not present ────────────
+-- The Workers arch uses awaiting_approval as a status while job waits for human.
+-- Existing statuses: running, succeeded, failed, stopped, timed_out
+
+-- If workflow_runs.status has a check constraint, update it:
+-- (Supabase doesn't enforce this by default unless you added one manually)
+-- Run this only if you get a constraint error:
+-- alter table workflow_runs drop constraint if exists workflow_runs_status_check;
+-- alter table workflow_runs add constraint workflow_runs_status_check
+--   check (status in ('running','succeeded','failed','stopped','timed_out','awaiting_approval'));
+
+
+-- ── 4. approval_queue — ensure workflow_run_id column exists ─────────────────
+-- The Python code uses workflow_run_id in approval_queue.
+-- Adding it if not present (some older schemas may not have it).
+
+alter table approval_queue
+  add column if not exists workflow_run_id uuid references workflow_runs(id) on delete set null;
+
+create index if not exists idx_approval_queue_run
+  on approval_queue (workflow_run_id)
+  where workflow_run_id is not null;

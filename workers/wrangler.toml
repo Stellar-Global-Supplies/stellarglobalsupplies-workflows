@@ -1,0 +1,51 @@
+# Stellar Global Supplies — Cloudflare Workers
+# Secrets set via Cloudflare Dashboard → Workers & Pages → Worker → Settings → Variables and Secrets
+#
+# Required secrets (add to each Worker in dashboard):
+#   SUPABASE_URL               https://xxxx.supabase.co
+#   SUPABASE_SERVICE_KEY       service role key
+#   BEDROCK_ACCESS_KEY_ID
+#   BEDROCK_SECRET_ACCESS_KEY
+#   BEDROCK_REGION             e.g. us-east-1
+#   GROQ_API_KEY
+#   TAVILY_API_KEY
+#
+# Note: No R2_PUBLIC_URL needed — asset URLs are built from SUPABASE_URL automatically
+
+# ── Worker 1: API Router ─────────────────────────────────────────────────────
+name               = "stellar-api"
+main               = "src/api-router.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding       = "DB"
+database_name = "stellar-workflows"
+database_id   = "76d6801a-7091-4036-b7a0-935ca9b56641"
+
+# ── Worker 2: Job Runner ─────────────────────────────────────────────────────
+[[workers]]
+name               = "stellar-job-runner"
+main               = "src/job-runner.js"
+compatibility_date = "2024-01-01"
+
+[[workers.triggers.crons]]
+cron = "* * * * *"
+
+[[workers.d1_databases]]
+binding       = "DB"
+database_name = "stellar-workflows"
+database_id   = "76d6801a-7091-4036-b7a0-935ca9b56641"
+
+# ── Worker 3: Schedule Runner ────────────────────────────────────────────────
+[[workers]]
+name               = "stellar-schedule-runner"
+main               = "src/schedule-runner.js"
+compatibility_date = "2024-01-01"
+
+[[workers.triggers.crons]]
+cron = "* * * * *"
+
+[[workers.d1_databases]]
+binding       = "DB"
+database_name = "stellar-workflows"
+database_id   = "76d6801a-7091-4036-b7a0-935ca9b56641"

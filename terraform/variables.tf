@@ -82,7 +82,7 @@ variable "linkedin_notify_emails" {
   default     = "workwithprasadbhavsar@gmail.com,stellarglobalsupplies@gmail.com"
 }
 
-variable "reviewer_email" {
+variable "reviewer_email" {   
   description = "Email address to receive approval notifications with one-click approve/reject links. Set via SSM after apply."
   type        = string
   default     = "workwithprasadbhavsar@gmail.com,stellarglobalsupplies@gmail.com"
