@@ -11,7 +11,7 @@
 import { getClient }           from './lib/supabase.js'
 import { getD1 }               from './lib/d1.js'
 import { ok, err, preflight, nowIso, buildCron } from './lib/utils.js'
-import { readJsonFromR2 }      from './lib/assets.js'
+import { readJson }             from './lib/assets.js'
 import { bedrockGenerateJson } from './lib/bedrock.js'
 
 export default {
@@ -345,7 +345,7 @@ async function handleData(path, method, request, qs, sb, d1, env) {
   if (path.includes('/data/content')) {
     const key = qs.get('key')
     if (!key) return err('Missing content key')
-    return ok({ content: await readJsonFromR2(env, key) })
+    return ok({ content: await readJson(env, key) })
   }
 
   // Orders — Supabase
