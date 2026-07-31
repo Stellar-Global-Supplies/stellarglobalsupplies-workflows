@@ -22,6 +22,14 @@ import { uploadImage, imageExtAndType }             from '../lib/assets.js'
 import { nowIso, slugify }                          from '../lib/utils.js'
 import { nextJob, insertApprovalGate }              from '../job-runner.js'
 
+// Helper to resolve Cloudflare secrets (handles both string and secret objects)
+async function resolveSecret(val) {
+  if (!val) return undefined
+  if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
+  if (typeof val === 'string') return val
+  return String(val)
+}
+
 const FLUX_BASE   = 'https://black-forest-labs-flux-1-schnell.hf.space'
 const MAX_RETRIES = 8
 
@@ -321,11 +329,11 @@ export async function blogCreateGithubPr(ctx) {
   if (!rows.length) throw new Error(`Blog post not found: ${blogId}`)
   const blog = rows[0]
 
-  const token      = env.GITHUB_TOKEN
-  const repoOwner  = env.WEBSITE_REPO_OWNER || ''
-  const repoName   = env.WEBSITE_REPO_NAME  || ''
-  const baseBranch = env.WEBSITE_BASE_BRANCH || 'main'
-  const blogDir    = env.WEBSITE_BLOG_DIR || 'content/blog'
+  const token      = await resolveSecret(env.GITHUB_TOKEN)
+  const repoOwner  = await resolveSecret(env.WEBSITE_REPO_OWNER) || ''
+  const repoName   = await resolveSecret(env.WEBSITE_REPO_NAME) || ''
+  const baseBranch = await resolveSecret(env.WEBSITE_BASE_BRANCH) || 'main'
+  const blogDir    = await resolveSecret(env.WEBSITE_BLOG_DIR) || 'content/blog'
 
   if (!repoOwner || !repoName) {
     throw new Error(`Missing GitHub config: WEBSITE_REPO_OWNER='${repoOwner}', WEBSITE_REPO_NAME='${repoName}'`)
