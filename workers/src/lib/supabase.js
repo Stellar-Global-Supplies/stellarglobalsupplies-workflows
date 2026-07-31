@@ -1,16 +1,17 @@
 /**
  * Lightweight Supabase REST client for Cloudflare Workers.
- * Mirrors the Python SupabaseClient in shared/supabase_client.py exactly.
  */
 export class SupabaseClient {
     constructor(url, key) {
+      if (!url) throw new Error('Missing secret: SUPABASE_URL is not set on this Worker')
+      if (!key) throw new Error('Missing secret: SUPABASE_SERVICE_KEY is not set on this Worker')
       this.url = url.replace(/\/$/, '')
       this.key = key
       this.headers = {
-        apikey:        key,
-        Authorization: `Bearer ${key}`,
+        apikey:         key,
+        Authorization:  `Bearer ${key}`,
         'Content-Type': 'application/json',
-        Prefer:        'return=representation',
+        Prefer:         'return=representation',
       }
     }
   
@@ -29,24 +30,10 @@ export class SupabaseClient {
       return text ? JSON.parse(text) : []
     }
   
-    async select(table, params = '')  { return this._request('GET',    table, null,  params) }
-    async insert(table, row)          { const r = await this._request('POST',   table, row);   return Array.isArray(r) ? r[0] : r }
-    async update(table, row, params)  { return this._request('PATCH',  table, row,   params) }
-    async delete(table, params)       { return this._request('DELETE', table, null,  params) }
-    async upsert(table, row, onConflict = '') {
-      const params = onConflict ? `on_conflict=${onConflict}` : ''
-      const saved  = this._headers_with({ Prefer: 'return=representation,resolution=merge-duplicates' },
-        () => this._request('POST', table, row, params))
-      return saved
-    }
-  
-    _headers_with(extra, fn) {
-      const orig = { ...this.headers }
-      Object.assign(this.headers, extra)
-      const result = fn()
-      this.headers = orig
-      return result
-    }
+    async select(table, params = '')  { return this._request('GET',    table, null, params) }
+    async insert(table, row)          { const r = await this._request('POST',  table, row);  return Array.isArray(r) ? r[0] : r }
+    async update(table, row, params)  { return this._request('PATCH',  table, row, params) }
+    async delete(table, params)       { return this._request('DELETE', table, null, params) }
   }
   
   export function getClient(env) {
