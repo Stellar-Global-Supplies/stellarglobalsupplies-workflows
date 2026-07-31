@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS job_queue (
   step_name        TEXT NOT NULL,
   status           TEXT NOT NULL DEFAULT 'pending'
                    CHECK (status IN ('pending','running','done','failed','waiting_for_approval')),
-  payload          TEXT NOT NULL DEFAULT '{}',   -- JSON string
+  payload          TEXT NOT NULL DEFAULT '{}',   
   retry_count      INTEGER NOT NULL DEFAULT 0,
   error_msg        TEXT,
   created_at       TEXT NOT NULL,
@@ -32,15 +32,13 @@ CREATE INDEX IF NOT EXISTS idx_job_queue_run
   ON job_queue (workflow_run_id);
 
 
--- ── workflow_runs ─────────────────────────────────────────────────────────────
-
 CREATE TABLE IF NOT EXISTS workflow_runs (
   id            TEXT PRIMARY KEY,
   workflow_type TEXT NOT NULL,
   status        TEXT NOT NULL DEFAULT 'running'
                 CHECK (status IN ('running','succeeded','failed','stopped','timed_out','awaiting_approval','paused')),
-  input         TEXT DEFAULT '{}',       -- JSON string
-  output        TEXT,                    -- JSON string
+  input         TEXT DEFAULT '{}',      
+  output        TEXT,                    
   error_msg     TEXT,
   started_at    TEXT NOT NULL,
   completed_at  TEXT,
@@ -57,8 +55,6 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_type
   ON workflow_runs (workflow_type, started_at DESC);
 
 
--- ── workflow_schedules ───────────────────────────────────────────────────────
-
 CREATE TABLE IF NOT EXISTS workflow_schedules (
   id            TEXT PRIMARY KEY,
   workflow_type TEXT NOT NULL,
@@ -66,11 +62,11 @@ CREATE TABLE IF NOT EXISTS workflow_schedules (
   frequency     TEXT NOT NULL DEFAULT 'monthly'
                 CHECK (frequency IN ('daily','weekly','monthly')),
   day_of_month  INTEGER DEFAULT 1,
-  days_of_week  TEXT DEFAULT '[]',     -- JSON string array
-  run_time      TEXT DEFAULT '09:00',  -- HH:MM IST
-  enabled       INTEGER NOT NULL DEFAULT 1,  -- 0 or 1 (D1 has no BOOLEAN)
-  parameters    TEXT DEFAULT '{}',     -- JSON string
-  cron_utc      TEXT,                  -- CF cron format in UTC
+  days_of_week  TEXT DEFAULT '[]',    
+  run_time      TEXT DEFAULT '09:00', 
+  enabled       INTEGER NOT NULL DEFAULT 1,  
+  parameters    TEXT DEFAULT '{}',    
+  cron_utc      TEXT,                  
   last_run_at   TEXT,
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL
@@ -80,15 +76,13 @@ CREATE INDEX IF NOT EXISTS idx_schedules_enabled
   ON workflow_schedules (enabled, workflow_type);
 
 
--- ── approval_queue ───────────────────────────────────────────────────────────
-
 CREATE TABLE IF NOT EXISTS approval_queue (
   id               TEXT PRIMARY KEY,
   workflow_type    TEXT NOT NULL,
   workflow_run_id  TEXT,
   reference_id     TEXT,
   task_token       TEXT,
-  payload          TEXT DEFAULT '{}',      -- JSON string
+  payload          TEXT DEFAULT '{}',      
   preview_html     TEXT DEFAULT '',
   status           TEXT NOT NULL DEFAULT 'pending'
                    CHECK (status IN ('pending','approved','rejected','expired')),

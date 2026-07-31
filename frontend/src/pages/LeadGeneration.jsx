@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { startWorkflow, getLeads } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
+import WorkflowProgress, { LEAD_GEN_STEPS } from '../components/WorkflowProgress'
 import { Users, Play, ExternalLink, AlertCircle, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -15,6 +16,7 @@ export default function LeadGeneration() {
   const [running, setRunning] = useState(false)
   const [emailingId, setEmailingId] = useState(null)
   const [tab, setTab] = useState('launch')
+  const [activeRunId, setActiveRunId] = useState(null)
 
   const { data: leadsData, isLoading } = useQuery({
     queryKey: ['leads'],
@@ -25,17 +27,32 @@ export default function LeadGeneration() {
 
   async function launch() {
     setRunning(true)
+    setActiveRunId(null)
     try {
       const res = await startWorkflow('lead-generation', form)
+      setActiveRunId(res.workflowRunId)
       toast.success(`Workflow started — run ID: ${res.workflowRunId?.slice(0,8)}`)
-      qc.invalidateQueries({ queryKey: ['leads'] })
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
-      setTab('leads')
     } catch (e) {
       toast.error(e.message)
+      setActiveRunId(null)
     } finally {
       setRunning(false)
     }
+  }
+
+  function handleComplete(status) {
+    setActiveRunId(null)
+    if (status === 'awaiting_approval') {
+      toast.success('Lead generated — check Approval Queue to review and send email')
+      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+    } else if (status === 'succeeded') {
+      toast.success('Lead generation completed')
+      qc.invalidateQueries({ queryKey: ['leads'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    } else if (status === 'failed') {
+      toast.error('Workflow failed — check progress panel for details')
+    }
+    setTab('leads')
   }
 
   async function draftFromLead(lead) {
@@ -55,29 +72,45 @@ export default function LeadGeneration() {
     <div className="p-6 max-w-5xl mx-auto">
       <PageHeader icon={Users} title="Lead Generation" sub="AI discovers companies · Hunter.io finds real emails · Gmail sends outreach" />
 
-      {/* Hunter.io info bar */}
-      <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 text-sm text-amber-800">
-        <Info size={16} className="flex-shrink-0 mt-0.5" />
-        <div>
-          <strong>Hunter.io Credit Policy — 50 searches/month:</strong> Each workflow first checks remaining credits.
-          If credits are above the minimum reserve (3), Hunter.io finds a <em>real verified email</em> for a real company domain.
-          When credits run low the workflow automatically falls back to an AI-generated free email (Gmail/Outlook/Yahoo)
-          so you never waste a credit on a duplicate or already-known domain.
+      {/* Live progress panel — shows when a workflow is running */}
+      {activeRunId && (
+        <div className="mb-5">
+          <WorkflowProgress
+            runId={activeRunId}
+            stepLabels={LEAD_GEN_STEPS}
+            onComplete={handleComplete}
+            onClose={() => setActiveRunId(null)}
+          />
         </div>
-      </div>
+      )}
+
+      {/* Hunter.io info bar */}
+      {!activeRunId && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 text-sm text-amber-800">
+          <Info size={16} className="flex-shrink-0 mt-0.5" />
+          <div>
+            <strong>Hunter.io Credit Policy — 50 searches/month:</strong> Each workflow first checks remaining credits.
+            If credits are above the minimum reserve (3), Hunter.io finds a <em>real verified email</em> for a real company domain.
+            When credits run low the workflow automatically falls back to an AI-generated free email (Gmail/Outlook/Yahoo)
+            so you never waste a credit on a duplicate or already-known domain.
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
-        {['launch','leads'].map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize
-              ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            {t === 'leads' ? `All Leads (${leads.length})` : 'Launch Workflow'}
-          </button>
-        ))}
-      </div>
+      {!activeRunId && (
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
+          {['launch','leads'].map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize
+                ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              {t === 'leads' ? `All Leads (${leads.length})` : 'Launch Workflow'}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {tab === 'launch' && (
+      {tab === 'launch' && !activeRunId && (
         <div className="card p-6 max-w-lg">
           <h2 className="font-semibold text-navy mb-4">New Lead Search</h2>
           <div className="space-y-4">
@@ -109,7 +142,7 @@ export default function LeadGeneration() {
         </div>
       )}
 
-      {tab === 'leads' && (
+      {tab === 'leads' && !activeRunId && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-100 text-sm font-medium text-navy">
             All Leads ({leads.length})

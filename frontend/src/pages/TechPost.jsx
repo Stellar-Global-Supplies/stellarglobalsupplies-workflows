@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { startWorkflow, getSocialPosts, repostSocialPost } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
+import WorkflowProgress, { SOCIAL_STEPS } from '../components/WorkflowProgress'
 import { Code2, Play, Image as ImgIcon, Repeat2, Linkedin, Facebook, Instagram } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -54,6 +55,7 @@ export default function TechPost() {
   })
   const [running, setRunning] = useState(false)
   const [tab, setTab] = useState('launch')
+  const [activeRunId, setActiveRunId] = useState(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['social-posts', 'tech'],
@@ -67,16 +69,31 @@ export default function TechPost() {
   async function launch() {
     if (!anyPlatform) { toast.error('Select at least one platform'); return }
     setRunning(true)
+    setActiveRunId(null)
     try {
       const res = await startWorkflow('social-tech', { type: 'tech', ...form })
+      setActiveRunId(res.workflowRunId)
       toast.success(`Tech post workflow started — ${res.workflowRunId?.slice(0,8)}`)
-      qc.invalidateQueries(['social-posts'])
-      setTab('posts')
     } catch (e) {
       toast.error(e.message)
+      setActiveRunId(null)
     } finally {
       setRunning(false)
     }
+  }
+
+  function handleComplete(status) {
+    setActiveRunId(null)
+    if (status === 'awaiting_approval') {
+      toast.success('Tech post drafted — check Approval Queue to review and publish')
+      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+    } else if (status === 'succeeded') {
+      toast.success('Tech post published successfully')
+      qc.invalidateQueries(['social-posts'])
+    } else if (status === 'failed') {
+      toast.error('Workflow failed — check progress panel for details')
+    }
+    setTab('posts')
   }
 
   async function postAgain(id) {
@@ -94,17 +111,32 @@ export default function TechPost() {
       <PageHeader icon={Code2} title="Tech Showcase Posts"
         sub="Reads {repo_name}/ai_context.md from S3 → AI generates post + image → approval → posts to selected platforms" />
 
-      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
-        {['launch','posts'].map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors
-              ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            {t === 'posts' ? `Tech Posts (${posts.length})` : 'Launch Workflow'}
-          </button>
-        ))}
-      </div>
+      {/* Live progress panel — shows when a workflow is running */}
+      {activeRunId && (
+        <div className="mb-5">
+          <WorkflowProgress
+            runId={activeRunId}
+            stepLabels={SOCIAL_STEPS}
+            onComplete={handleComplete}
+            onClose={() => setActiveRunId(null)}
+          />
+        </div>
+      )}
 
-      {tab === 'launch' && (
+      {/* Tabs */}
+      {!activeRunId && (
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
+          {['launch','posts'].map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors
+                ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              {t === 'posts' ? `Tech Posts (${posts.length})` : 'Launch Workflow'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'launch' && !activeRunId && (
         <div className="card p-6 max-w-lg">
           <h2 className="font-semibold text-navy mb-4">New Tech Showcase Post</h2>
           <div className="space-y-4">
@@ -127,11 +159,13 @@ export default function TechPost() {
             </FormField>
           </div>
 
-          <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
-            <strong>Context file format:</strong> Place a markdown file at
-            <code className="bg-slate-200 px-1 rounded mx-1">{'{repo_name}/ai_context.md'}</code>
-            in the private context bucket. The AI will use it to write an accurate tech showcase post and generate the featured image.
-          </div>
+          {!activeRunId && (
+            <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
+              <strong>Context file format:</strong> Place a markdown file at
+              <code className="bg-slate-200 px-1 rounded mx-1">{'{repo_name}/ai_context.md'}</code>
+              in the private context bucket. The AI will use it to write an accurate tech showcase post and generate the featured image.
+            </div>
+          )}
 
           <button onClick={launch} disabled={running || !anyPlatform} className="btn-primary w-full justify-center py-2.5 mt-5">
             {running
@@ -141,7 +175,7 @@ export default function TechPost() {
         </div>
       )}
 
-      {tab === 'posts' && (
+      {tab === 'posts' && !activeRunId && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-100 text-sm font-medium text-navy">Tech Posts ({posts.length})</div>
           {isLoading ? (

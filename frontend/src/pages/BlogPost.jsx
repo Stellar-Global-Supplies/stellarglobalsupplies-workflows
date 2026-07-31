@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { startWorkflow, getBlogPosts, republishBlogPost } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
+import WorkflowProgress, { BLOG_STEPS } from '../components/WorkflowProgress'
 import { FileText, Play, GitPullRequest, Repeat2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -27,6 +28,7 @@ export default function BlogPost() {
   })
   const [running, setRunning] = useState(false)
   const [tab, setTab] = useState('launch')
+  const [activeRunId, setActiveRunId] = useState(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['blog-posts'],
@@ -43,6 +45,7 @@ export default function BlogPost() {
 
   async function launch() {
     setRunning(true)
+    setActiveRunId(null)
     try {
       const payload = {
         topic:         customTopic ? form.custom_topic : form.topic,
@@ -51,14 +54,28 @@ export default function BlogPost() {
         custom_prompt: form.custom_prompt,
       }
       const res = await startWorkflow('blog', payload)
+      setActiveRunId(res.workflowRunId)
       toast.success(`Blog workflow started — ${res.workflowRunId?.slice(0,8)}`)
-      qc.invalidateQueries(['blog-posts'])
-      setTab('blogs')
     } catch (e) {
       toast.error(e.message)
+      setActiveRunId(null)
     } finally {
       setRunning(false)
     }
+  }
+
+  function handleComplete(status) {
+    setActiveRunId(null)
+    if (status === 'awaiting_approval') {
+      toast.success('Blog post drafted — check Approval Queue to review and publish')
+      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+    } else if (status === 'succeeded') {
+      toast.success('Blog post published successfully')
+      qc.invalidateQueries(['blog-posts'])
+    } else if (status === 'failed') {
+      toast.error('Workflow failed — check progress panel for details')
+    }
+    setTab('blogs')
   }
 
   async function publishAgain(id) {
@@ -76,17 +93,32 @@ export default function BlogPost() {
       <PageHeader icon={FileText} title="Blog Posts"
         sub="AI writes blog + generates featured image → approval → GitHub PR created automatically" />
 
-      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
-        {['launch','blogs'].map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors
-              ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            {t === 'blogs' ? `All Blogs (${blogs.length})` : 'Launch Workflow'}
-          </button>
-        ))}
-      </div>
+      {/* Live progress panel — shows when a workflow is running */}
+      {activeRunId && (
+        <div className="mb-5">
+          <WorkflowProgress
+            runId={activeRunId}
+            stepLabels={BLOG_STEPS}
+            onComplete={handleComplete}
+            onClose={() => setActiveRunId(null)}
+          />
+        </div>
+      )}
 
-      {tab === 'launch' && (
+      {/* Tabs */}
+      {!activeRunId && (
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
+          {['launch','blogs'].map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors
+                ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              {t === 'blogs' ? `All Blogs (${blogs.length})` : 'Launch Workflow'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'launch' && !activeRunId && (
         <div className="card p-6 max-w-lg">
           <h2 className="font-semibold text-navy mb-4">Generate Blog Post</h2>
           <div className="space-y-4">
@@ -117,11 +149,13 @@ export default function BlogPost() {
             </FormField>
           </div>
 
-          <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
-            <strong>On approval:</strong> A GitHub branch is created, the blog post is committed as
-            <code className="mx-1 bg-slate-200 px-1 rounded">content/blog/{'{slug}'}.md</code>
-            and a Pull Request is opened on your website repo.
-          </div>
+          {!activeRunId && (
+            <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
+              <strong>On approval:</strong> A GitHub branch is created, the blog post is committed as
+              <code className="mx-1 bg-slate-200 px-1 rounded">content/blog/{'{slug}'}.md</code>
+              and a Pull Request is opened on your website repo.
+            </div>
+          )}
 
           <button onClick={launch} disabled={running} className="btn-primary w-full justify-center py-2.5 mt-5">
             {running ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Starting…</>
@@ -130,7 +164,7 @@ export default function BlogPost() {
         </div>
       )}
 
-      {tab === 'blogs' && (
+      {tab === 'blogs' && !activeRunId && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-100 text-sm font-medium text-navy">All Blog Posts ({blogs.length})</div>
           {isLoading ? (

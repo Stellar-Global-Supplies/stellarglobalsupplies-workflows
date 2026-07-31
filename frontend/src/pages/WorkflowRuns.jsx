@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getWorkflowRuns } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, Skeleton } from '../components/ui'
-import { Activity, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
+import { Activity, ChevronDown, ChevronRight, RefreshCw, XCircle, AlertTriangle } from 'lucide-react'
 import { format, formatDistanceToNowStrict } from 'date-fns'
 
 const STATUSES = ['all', 'running', 'succeeded', 'failed', 'stopped', 'timed_out']
@@ -77,7 +77,17 @@ export default function WorkflowRuns() {
                   <Fragment key={run.id}>
                     <tr className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3 font-medium text-navy capitalize">{run.workflow_type?.replace(/_/g, ' ')}</td>
-                      <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <StatusBadge status={run.status} />
+                          {run.status === 'failed' && run.error_msg && (
+                            <span className="flex items-center gap-1 text-xs text-red-600">
+                              <AlertTriangle size={12} />
+                              Error
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-slate-500 text-xs">
                         <div>{format(new Date(run.started_at), 'dd MMM yy HH:mm')}</div>
                         <div className="text-slate-400">{formatDistanceToNowStrict(new Date(run.started_at), { addSuffix: true })}</div>
