@@ -58,6 +58,17 @@ export default {
       if (path.startsWith('/schedules'))
         return handleSchedules(path, method, request, qs, d1)
 
+      // Temporary debug endpoint — remove after secrets confirmed
+      if (path === '/debug-env' && method === 'GET') {
+        return new Response(JSON.stringify({
+          has_supabase_url:  !!env.SUPABASE_URL,
+          has_supabase_key:  !!env.SUPABASE_SERVICE_KEY,
+          has_bedrock_key:   !!env.BEDROCK_ACCESS_KEY_ID,
+          has_db:            !!env.DB,
+          supabase_url_preview: env.SUPABASE_URL ? env.SUPABASE_URL.slice(0,30) + '...' : 'MISSING',
+        }), { status: 200, headers: { 'Content-Type': 'application/json', ...CORS } })
+      }
+
       return err('Not found', 404)
 
     } catch (e) {
