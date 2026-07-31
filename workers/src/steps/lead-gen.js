@@ -535,6 +535,26 @@ export async function leadGenApprovalGate(ctx) {
 
   console.log(`[lead_gen_approval_gate] approval_id=${approvalId} lead=${leadId}`)
 
+  // Send notification email to reviewer
+  try {
+    const reviewerEmail = await resolveSecret(env.REVIEWER_EMAIL)
+    if (reviewerEmail) {
+      await sendLeadApprovalNotification(env, {
+        to:          reviewerEmail,
+        approvalId,
+        emailToken,
+        approveUrl:  `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=approve`,
+        rejectUrl:   `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=reject`,
+        lead,
+        emailDraft,
+        senderEmail,
+      })
+    }
+  } catch (e) {
+    console.warn(`[lead_gen_approval_gate] notification email failed: ${e.message}`)
+    // Don't throw — approval row is already created, workflow can continue via dashboard
+  }
+
   await d1.update('job_queue', { status: 'waiting_for_approval' }, { id: job.id })
   if (workflow_run_id) {
     await d1.update('workflow_runs', { status: 'awaiting_approval' }, { id: workflow_run_id })
@@ -638,6 +658,87 @@ async function sendViaGmail(accessToken, to, subject, html, sender) {
     throw new Error(`Gmail send failed ${res.status}: ${t}`)
   }
   return res.json()
+}
+
+async function sendLeadApprovalNotification(env, { to, approvalId, emailToken, approveUrl, rejectUrl, lead, emailDraft, senderEmail }) {
+  const companyName = lead.company_name || ''
+  const contactName = lead.contact_name || ''
+  const bodyPreview = (emailDraft.body || '').slice(0, 600)
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0"
+        style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
+        <tr>
+          <td style="background:#0A2547;padding:24px 32px">
+            <div style="color:#F59E0B;font-size:20px;font-weight:bold">Stellar Global Supplies</div>
+            <div style="color:#94A8B8;font-size:13px;margin-top:4px">New Lead Approval Required</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 16px">
+            <div style="font-size:20px;font-weight:bold;color:#0A2547">
+              New Lead — ${companyName}
+            </div>
+            <div style="color:#64748B;font-size:14px;margin-top:6px">
+              Contact: <strong>${contactName}</strong> · Email: <strong>${lead.email || ''}</strong>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 24px">
+            <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:20px;font-size:14px;color:#334155">
+              <p><strong>Company:</strong> ${companyName}</p>
+              <p><strong>Industry:</strong> ${lead.industry || ''}</p>
+              <p><strong>Website:</strong> ${lead.website || ''}</p>
+              <p><strong>Phone:</strong> ${lead.phone || ''}</p>
+              <hr style="border:none;border-top:1px solid #E2E8F0;margin:12px 0"/>
+              <p><strong>Email Subject:</strong> ${emailDraft.subject || ''}</p>
+              <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}${bodyPreview.length === 600 ? '...' : ''}</div>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 32px">
+            <table width="100%"><tr>
+              <td width="48%" align="center">
+                <a href="${approveUrl}"
+                   style="display:block;background:#10B981;color:#fff;text-decoration:none;
+                          font-size:16px;font-weight:bold;padding:14px 20px;border-radius:8px;text-align:center">
+                  ✓ &nbsp; Approve & Send
+                </a>
+              </td>
+              <td width="4%"></td>
+              <td width="48%" align="center">
+                <a href="${rejectUrl}"
+                   style="display:block;background:#EF4444;color:#fff;text-decoration:none;
+                          font-size:16px;font-weight:bold;padding:14px 20px;border-radius:8px;text-align:center">
+                  ✕ &nbsp; Reject
+                </a>
+              </td>
+            </tr></table>
+            <div style="text-align:center;margin-top:16px;color:#94A8B8;font-size:12px">
+              Links expire in 1 hour. Also manage at
+              <a href="https://app.stellarglobalsupplies.com/approvals" style="color:#1565C0">the dashboard</a>.
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#F8FAFC;border-top:1px solid #E2E8F0;padding:16px 32px;text-align:center">
+            <div style="color:#94A8B8;font-size:12px">Stellar Global Supplies · Pune, India</div>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`
+
+  const accessToken = await getGmailToken(env)
+  await sendViaGmail(accessToken, to, `[Approval] New Lead — ${companyName}`, html, senderEmail)
+  console.log(`[lead_gen_approval_gate] notification sent to=${to}`)
 }
 
 function buildPlainEmailHtml(subject, body) {
