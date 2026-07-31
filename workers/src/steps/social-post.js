@@ -29,7 +29,6 @@ import { nowIso }                                   from '../lib/utils.js'
 import { nextJob, insertApprovalGate }              from '../job-runner.js'
 
 const FLUX_BASE    = 'https://black-forest-labs-flux-1-schnell.hf.space'
-const MAX_RETRIES  = 8   // poll retries before giving up (~8 min with 1-min cron)
 
 // ─── SYSTEM PROMPT (exact copy from generate_post.py) ────────────────────────
 
@@ -181,7 +180,18 @@ export async function socialBedrockGeneratePost(ctx) {
       `order_id=eq.${encodeURIComponent(payload.orderId)}&type=eq.product&limit=1`
     )
     if (existing.length) {
-      console.log(`[social_bedrock_generate_post] duplicate — skipping`)
+      console.log(`[social_bedrock_generate_post] duplicate product post — skipping`)
+      return // marks current job done, chain ends
+    }
+  }
+
+  // Dedup check for tech posts
+  if (postType === 'tech' && repoName) {
+    const existing = await sb.select('social_posts',
+      `repo_name=eq.${encodeURIComponent(repoName)}&type=eq.tech&limit=1`
+    )
+    if (existing.length) {
+      console.log(`[social_bedrock_generate_post] duplicate tech post — skipping`)
       return // marks current job done, chain ends
     }
   }
@@ -374,7 +384,8 @@ export async function socialImagePoll(ctx) {
     return
   }
 
-  if (retries >= MAX_RETRIES) {
+  const maxRetries = parseInt(env?.IMAGE_POLL_MAX_RETRIES) || 8
+  if (retries >= maxRetries) {
     console.warn(`[social_image_poll] max retries reached for postId=${postId} — proceeding without image`)
     await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(payload))
     return
@@ -450,14 +461,15 @@ export async function socialImagePoll(ctx) {
     await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
 
   } catch (e) {
-    if (retries < MAX_RETRIES) {
+    const maxRetries = parseInt(env?.IMAGE_POLL_MAX_RETRIES) || 8
+    if (retries < maxRetries) {
       console.warn(`[social_image_poll] poll error (${e.message}) retry=${retries + 1}`)
       await nextJob(ctx, 'social_image_poll', {
         ...payload,
         imageRetries: retries + 1,
       })
     } else {
-      console.warn(`[social_image_poll] giving up after ${MAX_RETRIES} retries — proceeding without image`)
+      console.warn(`[social_image_poll] giving up after ${maxRetries} retries — proceeding without image`)
       await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(payload))
     }
   }

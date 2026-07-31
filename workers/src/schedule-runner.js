@@ -9,13 +9,15 @@ import { getD1 }              from './lib/d1.js'
 import { nowIso, cronIsDue }  from './lib/utils.js'
 
 const FIRST_STEP = {
-  'lead-generation': 'lead_tavily_find_company',
-  'lead_generation': 'lead_tavily_find_company',
-  'social-product':  'social_get_orders',
-  'social_product':  'social_get_orders',
-  'social-tech':     'social_get_orders',
-  'social_tech':     'social_get_orders',
-  'blog':            'blog_generate_outline',
+  'lead-generation':     'lead_tavily_find_company',
+  'lead_generation':     'lead_tavily_find_company',
+  'lead-email-existing': 'lead_load_existing',
+  'lead_email_existing': 'lead_load_existing',
+  'social-product':      'social_get_orders',
+  'social_product':      'social_get_orders',
+  'social-tech':         'social_get_orders',
+  'social_tech':         'social_get_orders',
+  'blog':                'blog_generate_outline',
 }
 
 export default {

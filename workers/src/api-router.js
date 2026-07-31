@@ -46,6 +46,11 @@ export default {
       if (path.match(/\/workflows\/[a-f0-9-]{36}\/status/) && method === 'GET')
         return handleWorkflowStatus(path, d1)
 
+      // POST /workflows/:runId/stop|pause|continue — control running workflows
+      const controlMatch = path.match(/\/workflows\/([a-f0-9-]{36})\/(stop|pause|continue)$/)
+      if (controlMatch && method === 'POST')
+        return handleWorkflowControl(controlMatch[1], controlMatch[2], d1)
+
       if (path.startsWith('/workflows/') && method === 'POST')
         return handleTrigger(path, request, d1)
 
@@ -98,12 +103,62 @@ const FIRST_STEP = {
   'payment-followup':   'payment_fetch_overdue',
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW CONTROL — stop / pause / continue
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function handleWorkflowControl(runId, action, d1) {
+  const rows = await d1.select('workflow_runs', { id: runId, _limit: 1 })
+  if (!rows.length) return err('Workflow run not found', 404)
+  const run = rows[0]
+  const now = nowIso()
+
+  if (action === 'stop') {
+    // Stop: mark as stopped, cancel all pending jobs
+    await d1.update('workflow_runs', {
+      status:       'stopped',
+      completed_at: now,
+      output:       { stopped: true },
+    }, { id: runId })
+    // Cancel all pending jobs for this run
+    await d1.update('job_queue', {
+      status:       'stopped',
+      completed_at: now,
+      error_msg:    'Workflow stopped by user',
+    }, { workflow_run_id: runId, status: 'pending' })
+    return ok({ message: 'Workflow stopped', runId })
+  }
+
+  if (action === 'pause') {
+    if (run.status !== 'running') return err(`Workflow is ${run.status} — cannot pause`)
+    await d1.update('workflow_runs', {
+      status: 'paused',
+    }, { id: runId })
+    return ok({ message: 'Workflow paused', runId })
+  }
+
+  if (action === 'continue') {
+    if (run.status !== 'paused') return err(`Workflow is ${run.status} — cannot continue`)
+    await d1.update('workflow_runs', {
+      status: 'running',
+    }, { id: runId })
+    return ok({ message: 'Workflow continued', runId })
+  }
+
+  return err(`Unknown action: ${action}`, 404)
+}
+
 async function handleTrigger(path, request, d1) {
   const wfType = path.replace('/workflows/', '').split('/')[0]
   if (!VALID_WORKFLOW_TYPES.includes(wfType))
     return err(`Unknown workflow type: ${wfType}. Valid: ${VALID_WORKFLOW_TYPES.join(', ')}`)
 
   const body  = await request.json().catch(() => ({}))
+  
+  // Validate required fields per workflow type
+  const validationError = validateWorkflowInput(wfType, body)
+  if (validationError) return err(validationError)
+  
   const runId = crypto.randomUUID()
   const now   = nowIso()
 
@@ -179,6 +234,10 @@ async function doApprove(d1, item, approvalId, note, edits, now, env) {
 
   if (edits) await persistEdits(d1, item, edits)
 
+  if (!runId) {
+    console.warn(`[doApprove] approvalId=${approvalId} approved but no runId — workflow not updated`)
+  }
+
   if (wfType === 'payment_followup') {
     await d1.insert('job_queue', {
       id:              crypto.randomUUID(),
@@ -227,9 +286,9 @@ async function doApprove(d1, item, approvalId, note, edits, now, env) {
   }, { id: approvalId })
 
   if (runId) {
+    // Set back to 'running' — more jobs are queued to execute
     await d1.update('workflow_runs', {
-      status:       'succeeded',
-      completed_at: now,
+      status:       'running',
       output:       { approved: true, note, approvalId, gate },
     }, { id: runId })
   }
@@ -561,7 +620,32 @@ async function handleDataAction(path, request, sb, d1) {
 // SCHEDULES — fully in D1
 // ═══════════════════════════════════════════════════════════════════════════
 
-const VALID_SCHEDULE_TYPES = ['lead-generation','social-product','social-tech','blog']
+const VALID_SCHEDULE_TYPES = ['lead-generation','lead-email-existing','social-product','social-tech','blog']
+
+function validateWorkflowInput(wfType, body) {
+  switch (wfType) {
+    case 'lead-generation':
+      if (!body.target_industry) return 'Missing required field: target_industry'
+      if (!body.target_country) return 'Missing required field: target_country'
+      break
+    case 'lead-email-existing':
+      if (!body.leadId && !body.lead_id) return 'Missing required field: leadId'
+      break
+    case 'social-product':
+      if (!body.order_id && !body.product_name) return 'Missing required field: order_id or product_name'
+      break
+    case 'social-tech':
+      if (!body.repo_name) return 'Missing required field: repo_name'
+      break
+    case 'blog':
+      if (!body.topic && !body.custom_topic) return 'Missing required field: topic or custom_topic'
+      break
+    case 'payment-followup':
+      // No required fields - uses default parameters
+      break
+  }
+  return null
+}
 
 async function handleSchedules(path, method, request, qs, d1) {
   const idMatch = path.match(/\/schedules\/([a-f0-9-]{36})/)

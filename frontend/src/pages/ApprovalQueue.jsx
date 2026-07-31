@@ -556,8 +556,9 @@ export default function ApprovalQueue() {
                         <Eye size={13}/>Review & Edit
                       </button>
                       <button onClick={() => handleApprove(item.id, '', {})}
-                        className="btn-primary text-xs py-1.5 bg-emerald-600 hover:bg-emerald-700">
-                        <Check size={13}/>Quick Approve
+                        disabled={actionLoading}
+                        className="btn-primary text-xs py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                        {actionLoading ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <><Check size={13}/>Quick Approve</>}
                       </button>
                     </div>
                   ) : (

@@ -22,6 +22,31 @@ import {
   paymentApprovalGate,
   paymentSendEmail,
 } from './steps/payment-followup.js'
+import {
+  blogGenerateOutline,
+  blogGenerateContent,
+  blogImageSubmit,
+  blogImagePoll,
+  blogCreateGithubPr,
+} from './steps/blog-post.js'
+import {
+  leadLoadExisting,
+  leadBedrockDraftEmail as leadEmailBedrockDraftEmail,
+  leadApprovalGate as leadEmailApprovalGate,
+  leadSendEmail as leadEmailSendEmail,
+} from './steps/lead-email.js'
+import {
+  leadTavilyFindCompany,
+  leadGroqExtractCompany,
+  leadCheckDuplicate,
+  leadTavilyFindContact,
+  leadTavilyScrapeWebsite,
+  leadGroqExtractEmail,
+  leadSave,
+  leadGenBedrockDraftEmail,
+  leadGenApprovalGate,
+  leadGenSendEmail,
+} from './steps/lead-gen.js'
 
 export default {
   async scheduled(event, env, ctx) {
@@ -53,6 +78,26 @@ async function runNextJob(env) {
   const job = pending[0]
   const now = nowIso()
 
+  // Skip jobs from paused or stopped workflows
+  if (job.workflow_run_id) {
+    const run = await d1.select('workflow_runs', { id: job.workflow_run_id, _limit: 1 })
+    if (run.length) {
+      if (run[0].status === 'paused') {
+        console.log(`[job-runner] workflow ${job.workflow_run_id} is paused — skipping job ${job.id}`)
+        return
+      }
+      if (run[0].status === 'stopped') {
+        console.log(`[job-runner] workflow ${job.workflow_run_id} is stopped — marking job ${job.id} as stopped`)
+        await d1.update('job_queue', {
+          status:       'stopped',
+          completed_at: now,
+          error_msg:    'Workflow was stopped',
+        }, { id: job.id })
+        return
+      }
+    }
+  }
+
   // Lock the job atomically — only update if still pending
   await d1.update('job_queue', {
     status:       'running',
@@ -80,17 +125,56 @@ async function executeStep(job, d1, env) {
   const handler = STEP_HANDLERS[job.step_name]
   if (!handler) throw new Error(`Unknown step: ${job.step_name}`)
 
+  let payload
+  try {
+    payload = typeof job.payload === 'string' ? JSON.parse(job.payload) : job.payload
+  } catch (e) {
+    throw new Error(`Invalid JSON in job payload: ${e.message}. Job ID: ${job.id}`)
+  }
+
   const ctx = {
     d1,
     env,
     job,
     workflow_run_id: job.workflow_run_id,
     workflow_type:   job.workflow_type,
-    payload:         typeof job.payload === 'string' ? JSON.parse(job.payload) : job.payload,
+    payload,
   }
 
   await handler(ctx)
   await markDone(d1, job.id)
+
+  // After marking the job done, check if the workflow chain is complete
+  // (no more pending jobs for this run). If so, mark workflow_run as succeeded.
+  // Add a small delay to allow other instances to pick up newly queued jobs
+  if (job.workflow_run_id) {
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    const remaining = await d1.select('job_queue', {
+      workflow_run_id: job.workflow_run_id,
+      status:          'pending',
+      _limit:          1,
+    })
+    if (!remaining.length) {
+      // Also check if there are running jobs (other instances may have picked up)
+      const running = await d1.select('job_queue', {
+        workflow_run_id: job.workflow_run_id,
+        status:          'running',
+        _limit:          1,
+      })
+      if (!running.length) {
+        // No pending AND no running jobs — chain is complete
+        const run = await d1.select('workflow_runs', { id: job.workflow_run_id, _limit: 1 })
+        if (run.length && run[0].status === 'running') {
+          await d1.update('workflow_runs', {
+            status:       'succeeded',
+            completed_at: nowIso(),
+          }, { id: job.workflow_run_id })
+          console.log(`[job-runner] workflow ${job.workflow_run_id} completed successfully`)
+        }
+      }
+    }
+  }
 }
 
 async function markDone(d1, jobId) {
@@ -190,22 +274,23 @@ export async function insertApprovalGate(ctx, nextStep, approvalData) {
 
 const STEP_HANDLERS = {
 
-  // ── Lead Generation ──────────────────────────────────────────────────────
-  lead_tavily_find_company:   async (ctx) => { console.log('[stub] lead_tavily_find_company');   await nextJob(ctx, 'lead_groq_extract_company') },
-  lead_groq_extract_company:  async (ctx) => { console.log('[stub] lead_groq_extract_company');  await nextJob(ctx, 'lead_check_duplicate') },
-  lead_check_duplicate:       async (ctx) => { console.log('[stub] lead_check_duplicate');       await nextJob(ctx, 'lead_tavily_find_contact') },
-  lead_tavily_find_contact:   async (ctx) => { console.log('[stub] lead_tavily_find_contact');   await nextJob(ctx, 'lead_tavily_scrape_website') },
-  lead_tavily_scrape_website: async (ctx) => { console.log('[stub] lead_tavily_scrape_website'); await nextJob(ctx, 'lead_groq_extract_email') },
-  lead_groq_extract_email:    async (ctx) => { console.log('[stub] lead_groq_extract_email');    await nextJob(ctx, 'lead_save') },
-  lead_save:                  async (ctx) => { console.log('[stub] lead_save');                  await nextJob(ctx, 'lead_bedrock_draft_email') },
-  lead_bedrock_draft_email:   async (ctx) => {
-    console.log('[stub] lead_bedrock_draft_email')
-    await insertApprovalGate(ctx, 'lead_send_email', { previewHtml: '<p>Lead email draft (stub)</p>' })
-  },
-  lead_send_email:            async (ctx) => { console.log('[stub] lead_send_email') },
+  // ── Lead Generation ────────────────────────────────────────── LIVE ✓ ──
+  lead_tavily_find_company:    (ctx) => leadTavilyFindCompany(ctx),
+  lead_groq_extract_company:   (ctx) => leadGroqExtractCompany(ctx),
+  lead_check_duplicate:        (ctx) => leadCheckDuplicate(ctx),
+  lead_tavily_find_contact:    (ctx) => leadTavilyFindContact(ctx),
+  lead_tavily_scrape_website:  (ctx) => leadTavilyScrapeWebsite(ctx),
+  lead_groq_extract_email:     (ctx) => leadGroqExtractEmail(ctx),
+  lead_save:                   (ctx) => leadSave(ctx),
+  lead_gen_draft_email:        (ctx) => leadGenBedrockDraftEmail(ctx),
+  lead_gen_approval_gate:      (ctx) => leadGenApprovalGate(ctx),
+  lead_gen_send_email:         (ctx) => leadGenSendEmail(ctx),
 
-  // ── Lead Email Existing ───────────────────────────────────────────────────
-  lead_load_existing:         async (ctx) => { console.log('[stub] lead_load_existing'); await nextJob(ctx, 'lead_bedrock_draft_email') },
+  // ── Lead Email Existing ────────────────────────────────────── LIVE ✓ ──
+  lead_load_existing:          (ctx) => leadLoadExisting(ctx),
+  lead_email_draft_email:      (ctx) => leadEmailBedrockDraftEmail(ctx),
+  lead_approval_gate:          (ctx) => leadEmailApprovalGate(ctx),
+  lead_send_email:             (ctx) => leadEmailSendEmail(ctx),
 
   // ── Social Product / Tech ──────────────────────────────────── LIVE ✓ ──
   social_get_orders:            (ctx) => socialGetOrders(ctx),
@@ -214,15 +299,12 @@ const STEP_HANDLERS = {
   social_image_poll:            (ctx) => socialImagePoll(ctx),
   social_post_to_platforms:     (ctx) => socialPostToPlatforms(ctx),
 
-  // ── Blog ──────────────────────────────────────────────────────────────────
-  blog_generate_outline:   async (ctx) => { console.log('[stub] blog_generate_outline');  await nextJob(ctx, 'blog_generate_content') },
-  blog_generate_content:   async (ctx) => { console.log('[stub] blog_generate_content');  await nextJob(ctx, 'blog_image_submit') },
-  blog_image_submit:       async (ctx) => { console.log('[stub] blog_image_submit');      await nextJob(ctx, 'blog_image_poll', { imageEventId: 'stub-event-id' }) },
-  blog_image_poll:         async (ctx) => {
-    console.log('[stub] blog_image_poll')
-    await insertApprovalGate(ctx, 'blog_create_github_pr', { previewHtml: '<p>Blog post ready (stub)</p>' })
-  },
-  blog_create_github_pr:   async (ctx) => { console.log('[stub] blog_create_github_pr') },
+  // ── Blog ────────────────────────────────────────────────────── LIVE ✓ ──
+  blog_generate_outline:   (ctx) => blogGenerateOutline(ctx),
+  blog_generate_content:   (ctx) => blogGenerateContent(ctx),
+  blog_image_submit:       (ctx) => blogImageSubmit(ctx),
+  blog_image_poll:         (ctx) => blogImagePoll(ctx),
+  blog_create_github_pr:   (ctx) => blogCreateGithubPr(ctx),
 
   // ── Payment Followup ─────────────────────────────────────────── LIVE ✓ ──
   payment_fetch_overdue:       (ctx) => paymentFetchOverdue(ctx),

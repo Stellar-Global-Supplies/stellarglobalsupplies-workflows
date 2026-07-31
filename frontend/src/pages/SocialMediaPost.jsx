@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { startWorkflow, getSocialPosts, repostSocialPost, lookupOrder } from '../services/api'
 import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
+import WorkflowProgress, { SOCIAL_STEPS } from '../components/WorkflowProgress'
 import { Share2, Play, Facebook, Instagram, Linkedin, Image as ImgIcon, Repeat2, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -58,6 +59,7 @@ export default function SocialMediaPost() {
   const [running, setRunning] = useState(false)
   const [lookupLoading, setLookupLoading] = useState(false)
   const [orderPreview, setOrderPreview] = useState(null)
+  const [activeRunId, setActiveRunId] = useState(null)
   const [tab, setTab] = useState('launch')
 
   const { data, isLoading } = useQuery({
@@ -71,24 +73,47 @@ export default function SocialMediaPost() {
 
   async function launch() {
     if (!anyPlatform) { toast.error('Select at least one platform'); return }
+    
+    // Validate required fields based on post type
+    if (form.type === 'product') {
+      if (!form.order_id && !form.product_name) {
+        toast.error('Provide an order ID or product name for product posts')
+        return
+      }
+    }
+    
     setRunning(true)
+    setActiveRunId(null)
     try {
       const payload = {
-        type:         'product',
+        type:         form.type,
         order_id:     form.order_id,
         product_name: form.product_name,
         product_type: form.product_type,
         prompt:       form.prompt,
         platforms:    form.platforms,
       }
-      const res = await startWorkflow('social-product', payload)
-      toast.success(`Product post workflow started — ${res.workflowRunId?.slice(0,8)}`)
+      const workflowType = form.type === 'tech' ? 'social-tech' : 'social-product'
+      const res = await startWorkflow(workflowType, payload)
+      setActiveRunId(res.workflowRunId)
       qc.invalidateQueries(['social-posts'])
       setTab('posts')
     } catch (e) {
       toast.error(e.message)
     } finally {
       setRunning(false)
+    }
+  }
+
+  function handleComplete(status) {
+    if (status === 'awaiting_approval') {
+      toast.success('Post drafted — check Approval Queue to review and publish')
+      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+    } else if (status === 'succeeded') {
+      toast.success('Post published successfully')
+      qc.invalidateQueries({ queryKey: ['social-posts'] })
+    } else if (status === 'failed') {
+      toast.error('Workflow failed — check progress panel for details')
     }
   }
 
@@ -120,6 +145,18 @@ export default function SocialMediaPost() {
     <div className="p-6 max-w-5xl mx-auto">
       <PageHeader icon={Share2} title="Product Social Posts"
         sub="Pull from orders → AI generates image + caption → approval → post to selected platforms" />
+
+      {/* Live progress panel — shows when a workflow is running */}
+      {activeRunId && (
+        <div className="mb-5">
+          <WorkflowProgress
+            runId={activeRunId}
+            stepLabels={SOCIAL_STEPS}
+            onComplete={handleComplete}
+            onClose={() => setActiveRunId(null)}
+          />
+        </div>
+      )}
 
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
         {['launch','posts'].map(t => (

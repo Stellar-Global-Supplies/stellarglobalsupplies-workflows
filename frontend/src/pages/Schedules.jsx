@@ -447,10 +447,10 @@ function ScheduleCard({ schedule, onEdit, onDelete, onToggle }) {
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <Clock size={11} />
             <span>{describeSchedule(schedule)}</span>
-            {schedule.last_triggered_at && (
+            {schedule.last_run_at && (
               <>
                 <span className="text-slate-300">·</span>
-                <span>Last ran {formatDistanceToNow(new Date(schedule.last_triggered_at), { addSuffix: true })}</span>
+                <span>Last ran {formatDistanceToNow(new Date(schedule.last_run_at), { addSuffix: true })}</span>
               </>
             )}
           </div>
@@ -614,7 +614,7 @@ function DeleteModal({ schedule, onClose }) {
   return (
     <Modal open={Boolean(schedule)} onClose={onClose} title="Delete Schedule" width="max-w-sm">
       <p className="text-slate-600 text-sm mb-1">Are you sure you want to delete <strong>{schedule?.label}</strong>?</p>
-      <p className="text-xs text-slate-400 mb-5">This will remove the schedule permanently. The associated EventBridge rule will need to be cleaned up separately.</p>
+      <p className="text-xs text-slate-400 mb-5">This will remove the schedule permanently. The associated Cloudflare Cron schedule will need to be cleaned up separately.</p>
       <div className="flex gap-3">
         <button onClick={onClose} className="btn-secondary flex-1 justify-center">Cancel</button>
         <button onClick={() => delMut.mutate()} disabled={delMut.isPending}
@@ -673,7 +673,7 @@ export default function Schedules() {
       <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 mb-6 text-xs text-blue-700">
         <Clock size={13} className="flex-shrink-0" />
         All schedules run in <strong className="mx-1">Indian Standard Time (IST · UTC+5:30)</strong>.
-        EventBridge rules are created with the equivalent UTC cron expression automatically.
+        Cloudflare Cron schedules are created with the equivalent UTC cron expression automatically.
       </div>
 
       {isLoading ? (

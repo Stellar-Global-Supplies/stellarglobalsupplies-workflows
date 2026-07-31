@@ -13,8 +13,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronUp, X, AlertTriangle } from 'lucide-react'
-import { getWorkflowStatus } from '../services/api'
+import { CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronUp, X, AlertTriangle, Pause, Play, Square } from 'lucide-react'
+import { getWorkflowStatus, stopWorkflow, pauseWorkflow, continueWorkflow } from '../services/api'
+import toast from 'react-hot-toast'
 
 // ── Step label maps per workflow type ─────────────────────────────────────
 
@@ -86,6 +87,13 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
   useEffect(() => {
     if (!runId) return
 
+    // Reset state for new workflow
+    setJobs([])
+    setRunStatus('running')
+    setError(null)
+    doneRef.current = false
+    startRef.current = Date.now()
+
     async function poll() {
       try {
         const data = await getWorkflowStatus(runId)
@@ -106,8 +114,9 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
       }
     }
 
+    const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL) || 2000
     poll()
-    intervalRef.current = setInterval(poll, 2000)
+    intervalRef.current = setInterval(poll, POLL_INTERVAL)
     timerRef.current    = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000)
 
     return () => {
@@ -126,20 +135,39 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
   const hasFailed   = runStatus === 'failed' || jobs.some(j => j.status === 'failed')
   const isApproval  = runStatus === 'awaiting_approval'
   const isSuccess   = runStatus === 'succeeded'
+  const isPaused     = runStatus === 'paused'
+  const isRunning    = runStatus === 'running'
 
   const headerBg = hasFailed   ? 'bg-red-600'
     : isApproval  ? 'bg-amber-500'
     : isSuccess   ? 'bg-emerald-600'
+    : isPaused    ? 'bg-slate-500'
     : 'bg-navy'
 
   const headerLabel = hasFailed  ? 'Workflow failed'
     : isApproval ? 'Awaiting your approval'
     : isSuccess  ? 'Workflow complete'
+    : isPaused   ? 'Workflow paused'
     : 'Workflow running…'
 
   const mins = Math.floor(elapsed / 60)
   const secs = elapsed % 60
   const elapsedStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+
+  async function handleControl(action) {
+    try {
+      if (action === 'stop')       await stopWorkflow(runId)
+      else if (action === 'pause')  await pauseWorkflow(runId)
+      else if (action === 'continue') await continueWorkflow(runId)
+      toast.success(`Workflow ${action}ed`)
+      // Refresh status immediately
+      const data = await getWorkflowStatus(runId)
+      setJobs(data.jobs || [])
+      setRunStatus(data.status || 'running')
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
 
   return (
     <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm bg-white">
@@ -147,14 +175,35 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
       {/* Header */}
       <div className={`${headerBg} px-4 py-3 flex items-center justify-between`}>
         <div className="flex items-center gap-2">
-          {!isTerminal && <Loader2 size={15} className="text-white/80 animate-spin" />}
+          {!isTerminal && !isPaused && <Loader2 size={15} className="text-white/80 animate-spin" />}
           {isSuccess   && <CheckCircle size={15} className="text-white" />}
           {hasFailed   && <XCircle     size={15} className="text-white" />}
           {isApproval  && <Clock       size={15} className="text-white" />}
+          {isPaused    && <Pause       size={15} className="text-white" />}
           <span className="text-white text-sm font-semibold">{headerLabel}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-white/70 text-xs font-mono">{elapsedStr}</span>
+          {/* Control buttons — only show when not terminal */}
+          {!isTerminal && !isApproval && (
+            <>
+              {isPaused ? (
+                <button onClick={() => handleControl('continue')} title="Continue"
+                  className="text-white/70 hover:text-white transition-colors">
+                  <Play size={14}/>
+                </button>
+              ) : (
+                <button onClick={() => handleControl('pause')} title="Pause"
+                  className="text-white/70 hover:text-white transition-colors">
+                  <Pause size={14}/>
+                </button>
+              )}
+              <button onClick={() => handleControl('stop')} title="Stop"
+                className="text-white/70 hover:text-red-300 transition-colors">
+                <Square size={13}/>
+              </button>
+            </>
+          )}
           <button onClick={() => setExpanded(v => !v)}
             className="text-white/70 hover:text-white transition-colors">
             {expanded ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}

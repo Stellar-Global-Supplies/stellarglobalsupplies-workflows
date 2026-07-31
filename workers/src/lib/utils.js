@@ -68,6 +68,15 @@ export const CORS_HEADERS = {
     // monthly
     return `${minute} ${hour} ${schedule.day_of_month || 1} * *`
   }
+
+  /** Validate IST time string format */
+  export function validateIstTime(timeStr) {
+    const match = timeStr?.match(/^(\d{1,2}):(\d{2})$/)
+    if (!match) return false
+    const hour = parseInt(match[1])
+    const minute = parseInt(match[2])
+    return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59
+  }
   
   /** Check if a cron expression is due at a given Date */
   export function cronIsDue(cronExpr, now = new Date()) {

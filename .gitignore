@@ -4,6 +4,9 @@ frontend/dist/
 frontend/.env
 frontend/.env.local
 frontend/.env.production
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
 # Python
 __pycache__/

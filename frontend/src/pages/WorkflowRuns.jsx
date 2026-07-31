@@ -86,7 +86,7 @@ export default function WorkflowRuns() {
                       <td className="px-4 py-3 text-slate-400 text-xs font-mono max-w-xs">
                         <button onClick={() => setOpenRunId(openRunId === run.id ? null : run.id)} className="flex items-center gap-1 hover:text-navy">
                           {openRunId === run.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          <span className="truncate">{run.execution_arn?.split(':').pop() || run.id.slice(0, 8)}</span>
+                          <span className="truncate">{run.workflow_type}_{run.id.slice(0, 8)}</span>
                         </button>
                       </td>
                     </tr>

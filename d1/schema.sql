@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   id            TEXT PRIMARY KEY,
   workflow_type TEXT NOT NULL,
   status        TEXT NOT NULL DEFAULT 'running'
-                CHECK (status IN ('running','succeeded','failed','stopped','timed_out','awaiting_approval')),
+                CHECK (status IN ('running','succeeded','failed','stopped','timed_out','awaiting_approval','paused')),
   input         TEXT DEFAULT '{}',       -- JSON string
   output        TEXT,                    -- JSON string
   error_msg     TEXT,

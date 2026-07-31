@@ -17,6 +17,8 @@ const TABS = [
 export default function HistoryPage() {
   const [tab, setTab] = useState('leads')
   const [openRunId, setOpenRunId] = useState(null)
+  const [repostingId, setRepostingId] = useState(null)
+  const [republishingId, setRepublishingId] = useState(null)
 
   const { data: leadsData,   isLoading: ll } = useQuery({ queryKey: ['history-leads'],   queryFn: () => getLeads(),                                   enabled: tab === 'leads' })
   const { data: productData, isLoading: lp } = useQuery({ queryKey: ['history-product'], queryFn: () => getSocialPosts('type=product&limit=100'),       enabled: tab === 'product' })
@@ -33,20 +35,28 @@ export default function HistoryPage() {
   const isLoading = { leads: ll, product: lp, tech: lt, blogs: lb, runs: lr }[tab]
 
   async function postAgain(id) {
+    if (repostingId) return
+    setRepostingId(id)
     try {
       await repostSocialPost(id)
       toast.success('Post sent again.')
     } catch (e) {
       toast.error(e.message)
+    } finally {
+      setRepostingId(null)
     }
   }
 
   async function publishAgain(id) {
+    if (republishingId) return
+    setRepublishingId(id)
     try {
       await republishBlogPost(id)
       toast.success('Blog PR created again.')
     } catch (e) {
       toast.error(e.message)
+    } finally {
+      setRepublishingId(null)
     }
   }
 
@@ -145,8 +155,8 @@ export default function HistoryPage() {
                     <div className="text-xs text-slate-400 flex-shrink-0">
                       {format(new Date(post.created_at), 'dd MMM yy')}
                     </div>
-                    <button onClick={() => postAgain(post.id)} className="btn-secondary text-xs py-1.5 h-fit">
-                      <Repeat2 size={13} /> Post Again
+                    <button onClick={() => postAgain(post.id)} disabled={repostingId === post.id} className="btn-secondary text-xs py-1.5 h-fit disabled:opacity-50 disabled:cursor-not-allowed">
+                      {repostingId === post.id ? 'Sending…' : <><Repeat2 size={13} /> Post Again</>}
                     </button>
                   </div>
                 ))}
@@ -188,8 +198,8 @@ export default function HistoryPage() {
                       )}
                     </div>
                   </div>
-                  <button onClick={() => publishAgain(blog.id)} className="btn-secondary text-xs py-1.5 h-fit">
-                    <Repeat2 size={13} /> Publish Again
+                  <button onClick={() => publishAgain(blog.id)} disabled={republishingId === blog.id} className="btn-secondary text-xs py-1.5 h-fit disabled:opacity-50 disabled:cursor-not-allowed">
+                    {republishingId === blog.id ? 'Creating…' : <><Repeat2 size={13} /> Publish Again</>}
                   </button>
                 </div>
               ))}
@@ -210,7 +220,7 @@ export default function HistoryPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
-                  <tr>{['Workflow','Status','Started','Duration','Execution ARN'].map(h=>(
+                  <tr>{['Workflow','Status','Started','Duration','Execution'].map(h=>(
                     <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
                   ))}</tr>
                 </thead>
@@ -226,7 +236,7 @@ export default function HistoryPage() {
                       <td className="px-4 py-3 text-slate-400 text-xs font-mono truncate max-w-xs">
                         <button onClick={() => setOpenRunId(openRunId === r.id ? null : r.id)} className="flex items-center gap-1 hover:text-navy">
                           {openRunId === r.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          {r.execution_arn?.split(':').pop()}
+                          <span className="truncate">{r.workflow_type}_{r.id.slice(0, 8)}</span>
                         </button>
                       </td>
                     </tr>
