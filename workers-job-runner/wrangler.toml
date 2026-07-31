@@ -1,0 +1,18 @@
+# Stellar Global Supplies — Job Runner Worker
+# Deploy separately: cd workers-job-runner && wrangler deploy
+
+name               = "stellar-job-runner"
+main               = "../workers/src/job-runner.js"
+compatibility_date = "2024-01-01"
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
+[[triggers.crons]]
+cron = "* * * * *"
+
+[[d1_databases]]
+binding       = "DB"
+database_name = "stellar-workflows"
+database_id   = "76d6801a-7091-4036-b7a0-935ca9b56641"
