@@ -8,6 +8,13 @@
  */
 
 import { getD1 }     from './lib/d1.js'
+import {
+  socialGetOrders,
+  socialBedrockGeneratePost,
+  socialImageSubmit,
+  socialImagePoll,
+  socialPostToPlatforms,
+} from './steps/social-post.js'
 import { nowIso }    from './lib/utils.js'
 import {
   paymentFetchOverdue,
@@ -200,15 +207,12 @@ const STEP_HANDLERS = {
   // ── Lead Email Existing ───────────────────────────────────────────────────
   lead_load_existing:         async (ctx) => { console.log('[stub] lead_load_existing'); await nextJob(ctx, 'lead_bedrock_draft_email') },
 
-  // ── Social Product / Tech ─────────────────────────────────────────────────
-  social_get_orders:            async (ctx) => { console.log('[stub] social_get_orders');            await nextJob(ctx, 'social_bedrock_generate_post') },
-  social_bedrock_generate_post: async (ctx) => { console.log('[stub] social_bedrock_generate_post'); await nextJob(ctx, 'social_image_submit') },
-  social_image_submit:          async (ctx) => { console.log('[stub] social_image_submit');          await nextJob(ctx, 'social_image_poll', { imageEventId: 'stub-event-id' }) },
-  social_image_poll:            async (ctx) => {
-    console.log('[stub] social_image_poll')
-    await insertApprovalGate(ctx, 'social_post_to_platforms', { previewHtml: '<p>Social post ready (stub)</p>' })
-  },
-  social_post_to_platforms:   async (ctx) => { console.log('[stub] social_post_to_platforms') },
+  // ── Social Product / Tech ──────────────────────────────────── LIVE ✓ ──
+  social_get_orders:            (ctx) => socialGetOrders(ctx),
+  social_bedrock_generate_post: (ctx) => socialBedrockGeneratePost(ctx),
+  social_image_submit:          (ctx) => socialImageSubmit(ctx),
+  social_image_poll:            (ctx) => socialImagePoll(ctx),
+  social_post_to_platforms:     (ctx) => socialPostToPlatforms(ctx),
 
   // ── Blog ──────────────────────────────────────────────────────────────────
   blog_generate_outline:   async (ctx) => { console.log('[stub] blog_generate_outline');  await nextJob(ctx, 'blog_generate_content') },
