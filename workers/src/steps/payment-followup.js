@@ -20,7 +20,7 @@
  *   GMAIL_REFRESH_TOKEN
  *   SENDER_EMAIL               sales@stellarglobalsupplies.com
  *   REVIEWER_EMAIL             internal team email for approval notifications
- *   API_BASE_URL               https://stellar-api.<subdomain>.workers.dev
+ *   API_BASE_URL               https://stellarglobalsupplies-workflows.workwithprasadbhavsar.workers.dev
  */
 
 import { bedrockGenerateJson } from '../lib/bedrock.js'
