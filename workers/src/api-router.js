@@ -14,18 +14,34 @@ import { ok, err, preflight, nowIso, buildCron } from './lib/utils.js'
 import { readJson }             from './lib/assets.js'
 import { bedrockGenerateJson } from './lib/bedrock.js'
 
+const CORS = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+}
+
+function corsErr(msg, status = 500) {
+  return new Response(JSON.stringify({ error: msg }), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...CORS },
+  })
+}
+
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') return preflight()
-
-    const url    = new URL(request.url)
-    const path   = url.pathname
-    const method = request.method
-    const qs     = url.searchParams
-    const sb     = getClient(env)   // Supabase — business data
-    const d1     = getD1(env)       // D1 — workflow engine data
+    // Always handle OPTIONS first — before anything can throw
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS })
+    }
 
     try {
+      const url    = new URL(request.url)
+      const path   = url.pathname
+      const method = request.method
+      const qs     = url.searchParams
+      const sb     = getClient(env)
+      const d1     = getD1(env)
+
       // GET /workflows/:runId/status — live progress polling
       if (path.match(/\/workflows\/[a-f0-9-]{36}\/status/) && method === 'GET')
         return handleWorkflowStatus(path, d1)
@@ -43,9 +59,11 @@ export default {
         return handleSchedules(path, method, request, qs, d1)
 
       return err('Not found', 404)
+
     } catch (e) {
-      console.error('api-router error:', e)
-      return err(`Internal error: ${e.message}`, 500)
+      console.error('api-router unhandled error:', e)
+      // Use corsErr here — guarantees CORS headers even on startup crashes
+      return corsErr(`Internal error: ${e.message}`, 500)
     }
   }
 }
