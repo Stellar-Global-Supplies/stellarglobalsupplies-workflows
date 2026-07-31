@@ -65,7 +65,7 @@ export default function BlogPost() {
   }
 
   function handleComplete(status) {
-    setActiveRunId(null)
+    // Don't hide the progress panel — let user close it manually via X button
     if (status === 'awaiting_approval') {
       toast.success('Blog post drafted — check Approval Queue to review and publish')
       qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
@@ -75,7 +75,6 @@ export default function BlogPost() {
     } else if (status === 'failed') {
       toast.error('Workflow failed — check progress panel for details')
     }
-    setTab('blogs')
   }
 
   async function publishAgain(id) {

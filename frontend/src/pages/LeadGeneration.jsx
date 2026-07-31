@@ -41,7 +41,7 @@ export default function LeadGeneration() {
   }
 
   function handleComplete(status) {
-    setActiveRunId(null)
+    // Don't hide the progress panel — let user close it manually via X button
     if (status === 'awaiting_approval') {
       toast.success('Lead generated — check Approval Queue to review and send email')
       qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
@@ -52,7 +52,6 @@ export default function LeadGeneration() {
     } else if (status === 'failed') {
       toast.error('Workflow failed — check progress panel for details')
     }
-    setTab('leads')
   }
 
   async function draftFromLead(lead) {
