@@ -18,8 +18,11 @@ async function apiRequest(method, path, body) {
 }
 
 // ── Workflows ──────────────────────────────────────────────
-export const startWorkflow = (type, payload) =>
+export const startWorkflow      = (type, payload) =>
   apiRequest('POST', `/workflows/${type}`, payload)
+
+export const getWorkflowStatus  = (runId) =>
+  apiRequest('GET', `/workflows/${runId}/status`)
 
 // ── Approvals ──────────────────────────────────────────────
 export const listApprovals = (status = 'pending', workflowType = '') => {
@@ -38,22 +41,22 @@ export const regenerateItem = (id, feedback = '') =>
   apiRequest('POST', `/approvals/${id}/regenerate`, { feedback })
 
 // ── Data ───────────────────────────────────────────────────
-export const getDashboard    = ()       => apiRequest('GET', '/data/dashboard')
-export const getLeads        = (qs='')  => apiRequest('GET', `/data/leads?${qs}`)
-export const getSocialPosts  = (qs='')  => apiRequest('GET', `/data/social-posts?${qs}`)
-export const getBlogPosts    = (qs='')  => apiRequest('GET', `/data/blog-posts?${qs}`)
-export const getOrders       = (qs='')  => apiRequest('GET', `/data/orders?${qs}`)
-export const getWorkflowRuns = (qs='')  => apiRequest('GET', `/data/workflow-runs?${qs}`)
-export const getGeneratedContent = (key) => apiRequest('GET', `/data/content?key=${encodeURIComponent(key)}`)
-export const lookupOrder = (orderId = '', productType = '') =>
+export const getDashboard        = ()      => apiRequest('GET', '/data/dashboard')
+export const getLeads            = (qs='') => apiRequest('GET', `/data/leads?${qs}`)
+export const getSocialPosts      = (qs='') => apiRequest('GET', `/data/social-posts?${qs}`)
+export const getBlogPosts        = (qs='') => apiRequest('GET', `/data/blog-posts?${qs}`)
+export const getOrders           = (qs='') => apiRequest('GET', `/data/orders?${qs}`)
+export const getWorkflowRuns     = (qs='') => apiRequest('GET', `/data/workflow-runs?${qs}`)
+export const getGeneratedContent = (key)   => apiRequest('GET', `/data/content?key=${encodeURIComponent(key)}`)
+export const lookupOrder         = (orderId = '', productType = '') =>
   apiRequest('GET', `/data/orders/lookup?order_id=${encodeURIComponent(orderId)}&product_type=${encodeURIComponent(productType)}`)
-export const repostSocialPost  = (id) => apiRequest('POST', `/data/social-posts/${id}/repost`, {})
-export const publishSocialPost = (id) => apiRequest('POST', `/data/social-posts/${id}/publish`, {})
-export const republishBlogPost = (id) => apiRequest('POST', `/data/blog-posts/${id}/republish`, {})
+export const repostSocialPost    = (id) => apiRequest('POST', `/data/social-posts/${id}/repost`, {})
+export const publishSocialPost   = (id) => apiRequest('POST', `/data/social-posts/${id}/publish`, {})
+export const republishBlogPost   = (id) => apiRequest('POST', `/data/blog-posts/${id}/republish`, {})
 
 // ── Schedules ──────────────────────────────────────────────
-export const getSchedules        = (qs = '') => apiRequest('GET',    `/schedules?${qs}`)
-export const createSchedule      = (body)    => apiRequest('POST',   '/schedules', body)
-export const updateSchedule      = (id, body)=> apiRequest('PATCH',  `/schedules/${id}`, body)
-export const deleteSchedule      = (id)      => apiRequest('DELETE', `/schedules/${id}`)
-export const toggleSchedule      = (id, enabled) => apiRequest('PATCH', `/schedules/${id}/toggle`, { enabled })
+export const getSchedules   = (qs = '') => apiRequest('GET',    `/schedules?${qs}`)
+export const createSchedule = (body)    => apiRequest('POST',   '/schedules', body)
+export const updateSchedule = (id, body)=> apiRequest('PATCH',  `/schedules/${id}`, body)
+export const deleteSchedule = (id)      => apiRequest('DELETE', `/schedules/${id}`)
+export const toggleSchedule = (id, enabled) => apiRequest('PATCH', `/schedules/${id}/toggle`, { enabled })

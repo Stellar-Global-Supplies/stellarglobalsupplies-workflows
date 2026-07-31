@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { startWorkflow, getOrders } from '../services/api'
 import { PageHeader, EmptyState, Skeleton } from '../components/ui'
+import WorkflowProgress, { PAYMENT_STEPS } from '../components/WorkflowProgress'
 import {
   CreditCard, AlertTriangle, CheckCircle, Clock, Send,
-  User, Package, Calendar, DollarSign, RefreshCw, ChevronDown, ChevronUp
+  Package, Calendar, RefreshCw, ChevronDown, ChevronUp
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { formatDistanceToNow, format } from 'date-fns'
+import { format } from 'date-fns'
 
 const STATUS_COLORS = {
   'After 30 days': { bg: 'bg-red-50',    text: 'text-red-700',    border: 'border-red-200',    dot: 'bg-red-500' },
@@ -30,19 +31,17 @@ function fmt(n) {
 
 function OrderCard({ order, onTrigger, triggering }) {
   const [expanded, setExpanded] = useState(false)
-  const payStyle = STATUS_COLORS[order.payment_status] || STATUS_COLORS['Pending']
+  const payStyle  = STATUS_COLORS[order.payment_status] || STATUS_COLORS['Pending']
   const isOverdue = order.payment_status === 'After 30 days'
-  const total = parseFloat(order.sale_cost || 0) + parseFloat(order.cgst_total || 0) + parseFloat(order.sgst_total || 0)
+  const total     = parseFloat(order.sale_cost || 0) + parseFloat(order.cgst_total || 0) + parseFloat(order.sgst_total || 0)
   const orderDate = order.created_at ? format(new Date(order.created_at), 'dd MMM yyyy') : '—'
   const delivery  = order.delivery_timeline ? format(new Date(order.delivery_timeline), 'dd MMM yyyy') : '—'
 
   return (
     <div className={`card transition-all ${isOverdue ? 'border-red-200' : ''}`}>
       <div className="flex items-center gap-4 p-5">
-        {/* Status dot */}
         <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${payStyle.dot}`} />
 
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="font-semibold text-navy text-sm">{order.customer_name}</span>
@@ -54,26 +53,21 @@ function OrderCard({ order, onTrigger, triggering }) {
             </span>
           </div>
           <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
-            <span className="flex items-center gap-1">
-              <Package size={11}/>{order.material} ({order.product_type})
-            </span>
+            <span className="flex items-center gap-1"><Package size={11}/>{order.material} ({order.product_type})</span>
             <span>{order.quantity} {order.unit}</span>
             <span className="font-medium text-navy">{fmt(total)}</span>
-            <span className="flex items-center gap-1">
-              <Calendar size={11}/>{orderDate}
-            </span>
+            <span className="flex items-center gap-1"><Calendar size={11}/>{orderDate}</span>
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {isOverdue && (
             <button
               onClick={() => onTrigger(order)}
-              disabled={triggering === order.id}
-              className="btn-primary text-xs py-1.5 gap-1.5 bg-red-600 hover:bg-red-700 whitespace-nowrap">
+              disabled={!!triggering}
+              className="btn-primary text-xs py-1.5 gap-1.5 bg-red-600 hover:bg-red-700 whitespace-nowrap disabled:opacity-50">
               {triggering === order.id
-                ? <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Drafting…</>
+                ? <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Starting…</>
                 : <><Send size={13}/>Send Follow-up</>}
             </button>
           )}
@@ -84,7 +78,6 @@ function OrderCard({ order, onTrigger, triggering }) {
         </div>
       </div>
 
-      {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-slate-100 px-5 py-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm mb-4">
@@ -102,7 +95,6 @@ function OrderCard({ order, onTrigger, triggering }) {
             </div>
           </div>
 
-          {/* Financial breakdown */}
           <div className="bg-slate-50 rounded-xl overflow-hidden">
             <table className="w-full text-xs">
               <thead>
@@ -134,7 +126,7 @@ function OrderCard({ order, onTrigger, triggering }) {
 
           {isOverdue && (
             <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-              <AlertTriangle size={13} className="text-red-500 flex-shrink-0 mt-0.5" />
+              <AlertTriangle size={13} className="text-red-500 flex-shrink-0 mt-0.5"/>
               <p className="text-xs text-red-700">
                 Payment is overdue. Click <strong>Send Follow-up</strong> to have AI draft a professional
                 payment reminder email to <strong>{order.email}</strong>. You'll review and approve
@@ -150,8 +142,9 @@ function OrderCard({ order, onTrigger, triggering }) {
 
 export default function PaymentFollowup() {
   const qc = useQueryClient()
-  const [triggering, setTriggering] = useState(null)
-  const [filter, setFilter]         = useState('After 30 days')
+  const [triggering,  setTriggering]  = useState(null)   // order.id being triggered
+  const [activeRunId, setActiveRunId] = useState(null)   // current workflow run being watched
+  const [filter,      setFilter]      = useState('After 30 days')
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['orders', filter],
@@ -168,14 +161,27 @@ export default function PaymentFollowup() {
 
   async function handleTrigger(order) {
     setTriggering(order.id)
+    setActiveRunId(null)
     try {
-      await startWorkflow('payment-followup', { orderId: order.id })
-      toast.success(`Follow-up email drafted for ${order.customer_name} — check Approval Queue`)
-      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+      const res = await startWorkflow('payment-followup', { orderId: order.id })
+      setActiveRunId(res.workflowRunId)
+      // Don't show toast here — progress panel shows status live
     } catch (e) {
       toast.error(e.message)
     } finally {
       setTriggering(null)
+    }
+  }
+
+  function handleComplete(status) {
+    if (status === 'awaiting_approval') {
+      toast.success('Email drafted — check Approval Queue to review and send')
+      qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
+    } else if (status === 'succeeded') {
+      toast.success('Payment follow-up sent successfully')
+      qc.invalidateQueries({ queryKey: ['orders'] })
+    } else if (status === 'failed') {
+      toast.error('Workflow failed — check progress panel for details')
     }
   }
 
@@ -194,10 +200,22 @@ export default function PaymentFollowup() {
         <button onClick={() => refetch()} className="btn-secondary"><RefreshCw size={14}/>Refresh</button>
       </PageHeader>
 
+      {/* Live progress panel — shows when a workflow is running */}
+      {activeRunId && (
+        <div className="mb-5">
+          <WorkflowProgress
+            runId={activeRunId}
+            stepLabels={PAYMENT_STEPS}
+            onComplete={handleComplete}
+            onClose={() => setActiveRunId(null)}
+          />
+        </div>
+      )}
+
       {/* Alert banner */}
-      {overdue.length > 0 && (
+      {overdue.length > 0 && !activeRunId && (
         <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-5 py-3.5 mb-5">
-          <AlertTriangle size={16} className="text-red-500 flex-shrink-0" />
+          <AlertTriangle size={16} className="text-red-500 flex-shrink-0"/>
           <div>
             <p className="text-sm font-semibold text-red-700">
               {overdue.length} order{overdue.length > 1 ? 's' : ''} with overdue payment
@@ -212,12 +230,12 @@ export default function PaymentFollowup() {
       {/* How it works */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { icon: AlertTriangle, label: '1. Detect',  sub: 'Orders with "After 30 days" payment status', color: 'text-red-500' },
-          { icon: CreditCard,    label: '2. AI Draft', sub: 'Nova drafts a professional payment reminder', color: 'text-blue-500' },
-          { icon: CheckCircle,   label: '3. Approve & Send', sub: 'You review in Approval Queue, then it sends', color: 'text-emerald-500' },
+          { icon: AlertTriangle, label: '1. Detect',        sub: 'Orders with "After 30 days" payment status', color: 'text-red-500' },
+          { icon: CreditCard,    label: '2. AI Draft',      sub: 'Nova Pro drafts a professional payment reminder', color: 'text-blue-500' },
+          { icon: CheckCircle,   label: '3. Approve & Send',sub: 'You review in Approval Queue, then it sends', color: 'text-emerald-500' },
         ].map(({ icon: Icon, label, sub, color }) => (
           <div key={label} className="card p-4 text-center">
-            <Icon size={20} className={`${color} mx-auto mb-2`} />
+            <Icon size={20} className={`${color} mx-auto mb-2`}/>
             <p className="text-xs font-semibold text-navy">{label}</p>
             <p className="text-xs text-slate-400 mt-0.5">{sub}</p>
           </div>
@@ -243,7 +261,7 @@ export default function PaymentFollowup() {
       ) : orders.length === 0 ? (
         <EmptyState icon={CreditCard}
           title={filter === 'After 30 days' ? 'No overdue payments' : 'No orders found'}
-          sub={filter === 'After 30 days' ? 'All payments are up to date' : `No orders with payment status "${filter}"`} />
+          sub={filter === 'After 30 days' ? 'All payments are up to date' : `No orders with payment status "${filter}"`}/>
       ) : (
         <div className="space-y-2">
           {orders.map(order => (

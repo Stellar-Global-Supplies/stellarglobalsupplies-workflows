@@ -11,7 +11,7 @@
 import { getClient }           from './lib/supabase.js'
 import { getD1 }               from './lib/d1.js'
 import { ok, err, preflight, nowIso, buildCron } from './lib/utils.js'
-import { readJson }             from './lib/assets.js'
+import { readJsonFromR2 }      from './lib/assets.js'
 import { bedrockGenerateJson } from './lib/bedrock.js'
 
 export default {
@@ -26,6 +26,10 @@ export default {
     const d1     = getD1(env)       // D1 — workflow engine data
 
     try {
+      // GET /workflows/:runId/status — live progress polling
+      if (path.match(/\/workflows\/[a-f0-9-]{36}\/status/) && method === 'GET')
+        return handleWorkflowStatus(path, d1)
+
       if (path.startsWith('/workflows/') && method === 'POST')
         return handleTrigger(path, request, d1)
 
@@ -345,7 +349,7 @@ async function handleData(path, method, request, qs, sb, d1, env) {
   if (path.includes('/data/content')) {
     const key = qs.get('key')
     if (!key) return err('Missing content key')
-    return ok({ content: await readJson(env, key) })
+    return ok({ content: await readJsonFromR2(env, key) })
   }
 
   // Orders — Supabase
@@ -634,4 +638,44 @@ function validateSchedule(body, partial) {
   if (body.day_of_month != null && !(body.day_of_month >= 1 && body.day_of_month <= 28))
     return 'day_of_month must be between 1 and 28'
   return null
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW STATUS  — polled by WorkflowProgress component every 2s
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function handleWorkflowStatus(path, d1) {
+  const match = path.match(/\/workflows\/([a-f0-9-]{36})\/status/)
+  if (!match) return err('Invalid run ID', 400)
+  const runId = match[1]
+
+  const [runs, jobs] = await Promise.all([
+    d1.select('workflow_runs', { id: runId, _limit: 1 }),
+    d1.select('job_queue', {
+      workflow_run_id: runId,
+      _order:          'created_at ASC',
+      _limit:          50,
+    }),
+  ])
+
+  if (!runs.length) return err('Workflow run not found', 404)
+  const run = runs[0]
+
+  return ok({
+    runId,
+    status:     run.status,
+    startedAt:  run.started_at,
+    completedAt: run.completed_at,
+    errorMsg:   run.error_msg,
+    jobs:       jobs.map(j => ({
+      id:          j.id,
+      step_name:   j.step_name,
+      status:      j.status,
+      retry_count: j.retry_count,
+      error_msg:   j.error_msg,
+      created_at:  j.created_at,
+      picked_up_at: j.picked_up_at,
+      completed_at: j.completed_at,
+    })),
+  })
 }

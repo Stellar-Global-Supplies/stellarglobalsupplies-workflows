@@ -9,6 +9,12 @@
 
 import { getD1 }     from './lib/d1.js'
 import { nowIso }    from './lib/utils.js'
+import {
+  paymentFetchOverdue,
+  paymentBedrockDraftEmail,
+  paymentApprovalGate,
+  paymentSendEmail,
+} from './steps/payment-followup.js'
 
 export default {
   async scheduled(event, env, ctx) {
@@ -214,11 +220,9 @@ const STEP_HANDLERS = {
   },
   blog_create_github_pr:   async (ctx) => { console.log('[stub] blog_create_github_pr') },
 
-  // ── Payment Followup ──────────────────────────────────────────────────────
-  payment_fetch_overdue:       async (ctx) => { console.log('[stub] payment_fetch_overdue');       await nextJob(ctx, 'payment_bedrock_draft_email') },
-  payment_bedrock_draft_email: async (ctx) => {
-    console.log('[stub] payment_bedrock_draft_email')
-    await insertApprovalGate(ctx, 'payment_send_email', { previewHtml: '<p>Payment followup email (stub)</p>' })
-  },
-  payment_send_email:          async (ctx) => { console.log('[stub] payment_send_email') },
+  // ── Payment Followup ─────────────────────────────────────────── LIVE ✓ ──
+  payment_fetch_overdue:       (ctx) => paymentFetchOverdue(ctx),
+  payment_bedrock_draft_email: (ctx) => paymentBedrockDraftEmail(ctx),
+  payment_approval_gate:       (ctx) => paymentApprovalGate(ctx),
+  payment_send_email:          (ctx) => paymentSendEmail(ctx),
 }
