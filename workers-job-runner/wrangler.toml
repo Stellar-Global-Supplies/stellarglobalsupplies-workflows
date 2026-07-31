@@ -1,6 +1,6 @@
 name               = "stellar-job-runner"
 main               = "../workers/src/job-runner.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-04-01"
 
 [observability.logs]
 enabled         = true

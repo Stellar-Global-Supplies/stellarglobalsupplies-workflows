@@ -2,7 +2,7 @@
 
 name               = "stellarglobalsupplies-workflows"
 main               = "src/api-router.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-04-01"
 
 workers_dev = true
 
@@ -17,6 +17,7 @@ crons = []
 binding       = "DB"
 database_name = "stellar-workflows"
 database_id   = "76d6801a-7091-4036-b7a0-935ca9b56641"
+
 [[secrets_store_secrets]]
 binding     = "SUPABASE_URL"
 secret_name = "SUPABASE_URL"
