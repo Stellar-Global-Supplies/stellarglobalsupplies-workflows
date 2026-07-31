@@ -34,8 +34,8 @@ async function bedrockInvoke(env, prompt, system, maxTokens) {
   const endpoint = `https://bedrock-runtime.${region}.amazonaws.com/model/${encodeURIComponent(MODEL_ID)}/invoke`
 
   const body = JSON.stringify({
-    messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-    ...(system ? { system: [{ type: 'text', text: system }] } : {}),
+    messages: [{ role: 'user', content: [{ text: prompt }] }],
+    ...(system ? { system: [{ text: system }] } : {}),
     inferenceConfig: { max_new_tokens: maxTokens, temperature: 0.7 },
   })
 
