@@ -1,13 +1,17 @@
 # Stellar Global Supplies — API Router Worker
-# Deploys as: stellarglobalsupplies-workflows (matches CF connected worker name)
 
 name               = "stellarglobalsupplies-workflows"
 main               = "src/api-router.js"
 compatibility_date = "2024-01-01"
 
+workers_dev = true
+
 [observability.logs]
 enabled         = true
 invocation_logs = true
+
+[triggers]
+crons = []
 
 [[d1_databases]]
 binding       = "DB"
