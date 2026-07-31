@@ -72,8 +72,14 @@ async function signRequest({ method, url, body, service, region, accessKeyId, se
     `x-amz-date:${datetime}`,
   ].join('\n') + '\n'
 
+  // AWS SigV4 requires double-encoding of the path in the canonical request.
+  // u.pathname is single-encoded (e.g. /model/amazon.nova-pro-v1%3A0/invoke)
+  // AWS expects double-encoded (e.g. /model/amazon.nova-pro-v1%253A0/invoke)
+  // We re-encode each path segment to achieve the double-encoding.
+  const canonicalUri = u.pathname.split('/').map(encodeURIComponent).join('/')
+
   const signedHeaders   = 'content-type;host;x-amz-content-sha256;x-amz-date'
-  const canonicalRequest = [method, u.pathname, u.search.slice(1), canonicalHeaders, signedHeaders, bodyHash].join('\n')
+  const canonicalRequest = [method, canonicalUri, u.search.slice(1), canonicalHeaders, signedHeaders, bodyHash].join('\n')
   const credentialScope  = `${date}/${region}/${service}/aws4_request`
   const stringToSign     = ['AWS4-HMAC-SHA256', datetime, credentialScope, await sha256Hex(canonicalRequest)].join('\n')
   const signingKey       = await getSigningKey(secretAccessKey, date, region, service)
