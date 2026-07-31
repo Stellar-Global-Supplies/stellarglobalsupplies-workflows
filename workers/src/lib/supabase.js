@@ -1,15 +1,31 @@
 /**
  * Lightweight Supabase REST client for Cloudflare Workers.
+ * Handles both plain string secrets and Secrets Store object bindings.
  */
-export class SupabaseClient {
+
+function resolveSecret(val) {
+    if (!val) return undefined
+    // Secrets Store delivers an object with a .get() method
+    if (typeof val === 'object' && typeof val.get === 'function') return val.get()
+    // Plain string (legacy env var)
+    if (typeof val === 'string') return val
+    // Fallback — try toString
+    return String(val)
+  }
+  
+  export class SupabaseClient {
     constructor(url, key) {
-      if (!url) throw new Error('Missing secret: SUPABASE_URL is not set on this Worker')
-      if (!key) throw new Error('Missing secret: SUPABASE_SERVICE_KEY is not set on this Worker')
-      this.url = url.replace(/\/$/, '')
-      this.key = key
+      const resolvedUrl = resolveSecret(url)
+      const resolvedKey = resolveSecret(key)
+  
+      if (!resolvedUrl) throw new Error('Missing secret: SUPABASE_URL is not set on this Worker')
+      if (!resolvedKey) throw new Error('Missing secret: SUPABASE_SERVICE_KEY is not set on this Worker')
+  
+      this.url = resolvedUrl.replace(/\/$/, '')
+      this.key = resolvedKey
       this.headers = {
-        apikey:         key,
-        Authorization:  `Bearer ${key}`,
+        apikey:         resolvedKey,
+        Authorization:  `Bearer ${resolvedKey}`,
         'Content-Type': 'application/json',
         Prefer:         'return=representation',
       }

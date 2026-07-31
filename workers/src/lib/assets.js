@@ -14,8 +14,17 @@
 
 const BUCKET = 'stellar-assets'
 
+function resolveSecret(val) {
+  if (!val) return undefined
+  if (typeof val === 'object' && typeof val.get === 'function') return val.get()
+  if (typeof val === 'string') return val
+  return String(val)
+}
+
+
+
 function storageBase(env) {
-  return `${env.SUPABASE_URL.replace(/\/$/, '')}/storage/v1`
+  return `${resolveSecret(env.SUPABASE_URL).replace(/\/$/, '')}/storage/v1`
 }
 
 function publicUrl(env, key) {
@@ -24,7 +33,7 @@ function publicUrl(env, key) {
 
 function authHeaders(env, contentType = null) {
   const h = {
-    Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    Authorization: `Bearer ${resolveSecret(env.SUPABASE_SERVICE_KEY)}`,
   }
   if (contentType) h['Content-Type'] = contentType
   return h
