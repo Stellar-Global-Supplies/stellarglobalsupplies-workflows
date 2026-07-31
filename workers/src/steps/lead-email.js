@@ -19,6 +19,14 @@ import { getClient }           from '../lib/supabase.js'
 import { nowIso }              from '../lib/utils.js'
 import { nextJob, insertApprovalGate } from '../job-runner.js'
 
+// Helper to resolve Cloudflare secrets (handles both string and secret objects)
+async function resolveSecret(val) {
+  if (!val) return undefined
+  if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
+  if (typeof val === 'string') return val
+  return String(val)
+}
+
 const SENDER_NAME    = 'Stellar Global Supplies Team'
 const COMPANY_WEBSITE = 'https://stellarglobalsupplies.com'
 
@@ -155,7 +163,7 @@ export async function leadSendEmail(ctx) {
   const lead       = payload.lead       || {}
   const emailDraft = payload.emailDraft || {}
   const leadId     = payload.leadId     || lead.id
-  const senderEmail = env.SENDER_EMAIL  || 'sales@stellarglobalsupplies.com'
+  const senderEmail = await resolveSecret(env.SENDER_EMAIL) || 'sales@stellarglobalsupplies.com'
 
   const to      = lead.email || ''
   const subject = emailDraft.subject || 'Outreach'
@@ -188,13 +196,21 @@ export async function leadSendEmail(ctx) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function getGmailToken(env) {
+  const clientId     = await resolveSecret(env.GMAIL_CLIENT_ID)
+  const clientSecret = await resolveSecret(env.GMAIL_CLIENT_SECRET)
+  const refreshToken = await resolveSecret(env.GMAIL_REFRESH_TOKEN)
+  
+  if (!clientId) throw new Error('Missing secret: GMAIL_CLIENT_ID')
+  if (!clientSecret) throw new Error('Missing secret: GMAIL_CLIENT_SECRET')
+  if (!refreshToken) throw new Error('Missing secret: GMAIL_REFRESH_TOKEN')
+  
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    new URLSearchParams({
-      client_id:     env.GMAIL_CLIENT_ID,
-      client_secret: env.GMAIL_CLIENT_SECRET,
-      refresh_token: env.GMAIL_REFRESH_TOKEN,
+      client_id:     clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
       grant_type:    'refresh_token',
     }),
   })

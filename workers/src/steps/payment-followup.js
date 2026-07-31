@@ -28,6 +28,14 @@ import { getClient }           from '../lib/supabase.js'
 import { nowIso }              from '../lib/utils.js'
 import { nextJob, insertApprovalGate } from '../job-runner.js'
 
+// Helper to resolve Cloudflare secrets (handles both string and secret objects)
+async function resolveSecret(val) {
+  if (!val) return undefined
+  if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
+  if (typeof val === 'string') return val
+  return String(val)
+}
+
 const SENDER_NAME    = 'Stellar Global Supplies Team'
 const COMPANY_WEBSITE = 'https://stellarglobalsupplies.com'
 
@@ -110,7 +118,7 @@ export async function paymentBedrockDraftEmail(ctx) {
 
   if (!order.id) throw new Error('Missing order in payload')
 
-  const senderEmail  = env.SENDER_EMAIL || 'sales@stellarglobalsupplies.com'
+  const senderEmail  = await resolveSecret(env.SENDER_EMAIL) || 'sales@stellarglobalsupplies.com'
   const saleCost     = parseFloat(order.sale_cost    || 0)
   const cgst         = parseFloat(order.cgst_total   || 0)
   const sgst         = parseFloat(order.sgst_total   || 0)
@@ -184,7 +192,7 @@ export async function paymentApprovalGate(ctx) {
   const apiBase      = (env.API_BASE_URL || '').replace(/\/$/, '')
   const approveUrl   = `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=approve`
   const rejectUrl    = `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=reject`
-  const senderEmail  = env.SENDER_EMAIL || 'sales@stellarglobalsupplies.com'
+  const senderEmail  = await resolveSecret(env.SENDER_EMAIL) || 'sales@stellarglobalsupplies.com'
 
   const approvalPayload = {
     approvalGate:  'save',
@@ -232,7 +240,7 @@ export async function paymentApprovalGate(ctx) {
 
   // Send notification email to reviewer
   try {
-    const reviewerEmail = env.REVIEWER_EMAIL
+    const reviewerEmail = await resolveSecret(env.REVIEWER_EMAIL)
     if (reviewerEmail) {
       await sendApprovalNotification(env, {
         to:          reviewerEmail,
@@ -269,7 +277,7 @@ export async function paymentSendEmail(ctx) {
   const order       = payload.order      || {}
   const emailData   = payload.email      || {}
   const approvalId  = payload.approvalId
-  const senderEmail = env.SENDER_EMAIL   || 'sales@stellarglobalsupplies.com'
+  const senderEmail = await resolveSecret(env.SENDER_EMAIL) || 'sales@stellarglobalsupplies.com'
 
   const to      = emailData.to      || order.email || ''
   const subject = emailData.subject || 'Payment Follow-up'
@@ -313,13 +321,21 @@ export async function paymentSendEmail(ctx) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function getGmailToken(env) {
+  const clientId     = await resolveSecret(env.GMAIL_CLIENT_ID)
+  const clientSecret = await resolveSecret(env.GMAIL_CLIENT_SECRET)
+  const refreshToken = await resolveSecret(env.GMAIL_REFRESH_TOKEN)
+  
+  if (!clientId) throw new Error('Missing secret: GMAIL_CLIENT_ID')
+  if (!clientSecret) throw new Error('Missing secret: GMAIL_CLIENT_SECRET')
+  if (!refreshToken) throw new Error('Missing secret: GMAIL_REFRESH_TOKEN')
+  
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    new URLSearchParams({
-      client_id:     env.GMAIL_CLIENT_ID,
-      client_secret: env.GMAIL_CLIENT_SECRET,
-      refresh_token: env.GMAIL_REFRESH_TOKEN,
+      client_id:     clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
       grant_type:    'refresh_token',
     }),
   })
