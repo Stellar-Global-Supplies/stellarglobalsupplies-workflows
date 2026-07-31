@@ -1,37 +1,45 @@
 /**
  * Lightweight Supabase REST client for Cloudflare Workers.
- * Handles both plain string secrets and Secrets Store object bindings.
+ * Secrets Store bindings require async .get() to unwrap the value.
  */
 
-function resolveSecret(val) {
+async function resolveSecret(val) {
     if (!val) return undefined
-    // Secrets Store delivers an object with a .get() method
-    if (typeof val === 'object' && typeof val.get === 'function') return val.get()
-    // Plain string (legacy env var)
+    // Secrets Store binding — async .get()
+    if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
+    // Plain string
     if (typeof val === 'string') return val
-    // Fallback — try toString
     return String(val)
   }
   
   export class SupabaseClient {
     constructor(url, key) {
-      const resolvedUrl = resolveSecret(url)
-      const resolvedKey = resolveSecret(key)
+      // Store raw values — resolve async in _init()
+      this._rawUrl = url
+      this._rawKey = key
+      this._ready  = null
+    }
   
-      if (!resolvedUrl) throw new Error('Missing secret: SUPABASE_URL is not set on this Worker')
-      if (!resolvedKey) throw new Error('Missing secret: SUPABASE_SERVICE_KEY is not set on this Worker')
+    async _init() {
+      if (this._ready) return
+      this.url = await resolveSecret(this._rawUrl)
+      this.key = await resolveSecret(this._rawKey)
   
-      this.url = resolvedUrl.replace(/\/$/, '')
-      this.key = resolvedKey
+      if (!this.url) throw new Error('Missing secret: SUPABASE_URL is not set')
+      if (!this.key) throw new Error('Missing secret: SUPABASE_SERVICE_KEY is not set')
+  
+      this.url = this.url.replace(/\/$/, '')
       this.headers = {
-        apikey:         resolvedKey,
-        Authorization:  `Bearer ${resolvedKey}`,
+        apikey:         this.key,
+        Authorization:  `Bearer ${this.key}`,
         'Content-Type': 'application/json',
         Prefer:         'return=representation',
       }
+      this._ready = true
     }
   
     async _request(method, table, body = null, params = '') {
+      await this._init()
       let url = `${this.url}/rest/v1/${table}`
       if (params) url += `?${params}`
   
