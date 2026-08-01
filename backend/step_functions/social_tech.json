@@ -1,0 +1,54 @@
+{
+  "Comment": "Tech Post Workflow — Read S3 context, generate post, queue for save-approval. Publishing triggered separately from Content page.",
+  "StartAt": "ReadS3Context",
+  "States": {
+    "ReadS3Context": {
+      "Type": "Task",
+      "Resource": "${ReadS3ContextArn}",
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 2, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "GenerateTechPost"
+    },
+    "GenerateTechPost": {
+      "Type": "Task",
+      "Resource": "${GeneratePostArn}",
+      "Parameters": {
+        "type": "tech",
+        "prompt.$": "$.prompt",
+        "repo_name.$": "$.repo_name",
+        "contextText.$": "$.contextText",
+        "workflowRunId.$": "$.workflowRunId"
+      },
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException"], "IntervalSeconds": 5, "MaxAttempts": 3}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "WorkflowFailed", "ResultPath": "$.error"}],
+      "Next": "WaitForSaveApproval"
+    },
+    "WaitForSaveApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${CreateApprovalArn}",
+        "Payload": {
+          "taskToken.$": "$$.Task.Token",
+          "workflowType": "social_tech",
+          "approvalGate": "save",
+          "data.$": "$"
+        }
+      },
+      "ResultPath": "$.approvalResult",
+      "TimeoutSeconds": 3600,
+      "HeartbeatSeconds": 3000,
+      "Catch": [
+        {"ErrorEquals": ["States.HeartbeatTimeout", "States.Timeout"], "Next": "ApprovalExpired", "ResultPath": "$.error"},
+        {"ErrorEquals": ["Rejected"], "Next": "PostDiscarded", "ResultPath": "$.error"}
+      ],
+      "Next": "SaveApproved"
+    },
+    "SaveApproved":   {"Type": "Succeed"},
+    "PostDiscarded":  {"Type": "Succeed"},
+    "ApprovalExpired":{"Type": "Succeed"},
+    "WorkflowFailed": {"Type": "Fail", "Error": "WorkflowError"}
+  }
+}

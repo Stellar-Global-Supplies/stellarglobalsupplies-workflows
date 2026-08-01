@@ -1,0 +1,9 @@
+# All Lambda functions use only Python stdlib + boto3 (provided in Lambda runtime).
+# boto3 and botocore are pre-installed in the Lambda Python 3.11 runtime.
+# No additional pip installs are required for deployment.
+
+# If you add any third-party deps, list them here and they will be
+# installed into the package/ dir by the GitHub Actions deploy-backend workflow.
+
+# boto3==1.34.0    # Already in Lambda runtime - do NOT bundle
+# botocore==1.34.0 # Already in Lambda runtime - do NOT bundle
