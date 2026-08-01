@@ -142,18 +142,46 @@ export async function leadTavilyFindCompany(ctx) {
   const country  = payload.target_country  || 'India'
   const extra    = payload.additional_context || ''
 
-  // Use Tavily to find real companies
-  const query = `B2B companies in ${industry} industry in ${country} ${extra ? `(${extra})` : ''}`
-  const searchResult = await tavilySearch(env, query)
+  // Use multiple targeted Tavily searches to find real companies
+  const queries = [
+    `${industry} company ${country} procurement buyer B2B supplier contact`,
+    `${industry} manufacturer importer ${country} wholesale bulk orders site:linkedin.com OR site:indiamart.com OR site:kompass.com`,
+    extra ? `${industry} ${extra} ${country} company contact email` : `${industry} ${country} procurement manager company official website`,
+  ]
 
-  const companies = (searchResult.results || []).slice(0, 3).map(r => ({
-    company_name: r.title?.replace(/ - .*$/, '').trim() || 'Unknown Company',
-    website:      r.url || '',
-    description:  r.content?.slice(0, 200) || '',
-  }))
+  const allResults = []
+  for (const query of queries.slice(0, 2)) {  // 2 Tavily credits max
+    try {
+      const result = await tavilySearch(env, query)
+      allResults.push(...(result.results || []))
+    } catch (e) {
+      console.warn(`[lead_tavily_find_company] query failed: ${e.message}`)
+    }
+  }
+
+  // Deduplicate by domain and filter out directories/job sites
+  const SKIP_DOMAINS = ['linkedin.com','indeed.com','glassdoor.com','naukri.com','justdial.com',
+    'wikipedia.org','facebook.com','twitter.com','instagram.com','youtube.com']
+  const seen = new Set()
+  const companies = []
+
+  for (const r of allResults) {
+    try {
+      const url = new URL(r.url)
+      const domain = url.hostname.replace(/^www\./, '')
+      if (seen.has(domain)) continue
+      if (SKIP_DOMAINS.some(d => domain.includes(d))) continue
+      seen.add(domain)
+      companies.push({
+        company_name: r.title?.replace(/ [-|·].*$/, '').replace(/ - .*$/, '').trim() || domain,
+        website:      `${url.protocol}//${url.hostname}`,
+        description:  (r.content || '').slice(0, 300),
+      })
+    } catch { /* skip invalid URLs */ }
+  }
 
   if (!companies.length) {
-    throw new Error('Tavily returned no companies')
+    throw new Error('Tavily returned no usable companies — try different industry or context')
   }
 
   console.log(`[lead_tavily_find_company] found ${companies.length} companies`)
@@ -242,21 +270,21 @@ export async function leadCheckDuplicate(ctx) {
   }
 
   if (isDuplicate) {
-    console.log(`[lead_check_duplicate] duplicate found — existingId=${existingId}, skipping`)
-    
-    // Update workflow_run to indicate duplicate was found
+    console.log(`[lead_check_duplicate] duplicate found existingId=${existingId} — skipping`)
     if (ctx.workflow_run_id) {
       await ctx.d1.update('workflow_runs', {
-        status: 'succeeded',
-        output: { 
-          duplicate_found: true, 
-          existing_id: existingId, 
-          message: 'Duplicate lead skipped' 
-        },
+        status:       'succeeded',
+        completed_at: nowIso(),
+        output:       { duplicate_found: true, existing_id: existingId, message: 'Duplicate lead — skipped' },
       }, { id: ctx.workflow_run_id })
+      // Also mark the current job done so it shows correctly in progress panel
+      await ctx.d1.update('job_queue', {
+        status:       'done',
+        completed_at: nowIso(),
+        error_msg:    'Duplicate lead — skipped',
+      }, { id: ctx.job.id })
     }
-    
-    return  // Chain ends — no more jobs
+    return
   }
 
   console.log(`[lead_check_duplicate] no duplicate found — continuing`)
@@ -272,13 +300,25 @@ export async function leadTavilyFindContact(ctx) {
   const { payload, env } = ctx
   const lead = payload.lead || {}
 
-  const query = `${lead.company_name} ${lead.industry || ''} procurement manager contact email LinkedIn`
-  const searchResult = await tavilySearch(env, query)
+  const queries = [
+    `"${lead.company_name}" procurement manager director contact email`,
+    `"${lead.company_name}" site:linkedin.com`,
+  ]
 
-  const contacts = (searchResult.results || []).slice(0, 3).map(r => ({
-    title:       r.title || '',
-    content:     r.content || '',
-    url:         r.url || '',
+  const allResults = []
+  for (const q of queries.slice(0, 1)) {  // 1 Tavily credit
+    try {
+      const result = await tavilySearch(env, q)
+      allResults.push(...(result.results || []))
+    } catch (e) {
+      console.warn(`[lead_tavily_find_contact] query failed: ${e.message}`)
+    }
+  }
+
+  const contacts = allResults.slice(0, 5).map(r => ({
+    title:   r.title || '',
+    content: r.content || '',
+    url:     r.url || '',
   }))
 
   console.log(`[lead_tavily_find_contact] found ${contacts.length} potential contacts`)
@@ -336,31 +376,51 @@ export async function leadGroqExtractEmail(ctx) {
   const contacts       = payload.contacts || []
   const scrapedContent = payload.scrapedContent || ''
 
-  const prompt = `Extract or generate a contact email for this company:
+  // Extract all emails from scraped content using regex first
+  const emailRegexGlobal = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
+  const foundEmails = [
+    ...(scrapedContent.match(emailRegexGlobal) || []),
+    ...contacts.map(c => c.content.match(emailRegexGlobal) || []).flat(),
+  ].filter(e => !e.includes('sentry') && !e.includes('example') && !e.includes('noreply'))
+
+  // Get domain from website for fallback
+  let companyDomain = ''
+  try {
+    companyDomain = new URL(lead.website || '').hostname.replace(/^www\./, '')
+  } catch { /* ignore */ }
+
+  const prompt = `You are a B2B sales intelligence AI. Extract or generate a contact email for procurement/purchasing at this company.
 
 Company: ${lead.company_name}
 Website: ${lead.website || 'N/A'}
+Domain: ${companyDomain || 'N/A'}
 Industry: ${lead.industry || 'N/A'}
 
-Search results (contacts):
-${contacts.map(c => `- ${c.title}: ${c.content.slice(0, 200)}`).join('\n')}
+Emails found in search results: ${foundEmails.slice(0, 10).join(', ') || 'none'}
+
+Contact search results:
+${contacts.map(c => `- ${c.title}\n  ${c.content.slice(0, 300)}`).join('\n\n')}
 
 Scraped website content:
-${scrapedContent.slice(0, 1000)}
+${scrapedContent.slice(0, 1200)}
 
-Email fallback chain (use first that works):
-1. If an email is found in the content above, use it
-2. If other emails at the same domain are found, guess firstname@domain.com
-3. If domain is known but no emails, use procurement@domain.com
-4. If nothing found, set needs_review: true
+Email selection rules (strict priority):
+1. FOUND: If a real email at ${companyDomain || 'the company domain'} is in the lists above, use it
+2. GUESSED: If first/last name found but no email, guess firstname@${companyDomain || 'domain.com'} or firstname.lastname@${companyDomain || 'domain.com'}
+3. FALLBACK: If domain is known (${companyDomain || 'N/A'}), use procurement@${companyDomain || 'domain.com'} or sales@${companyDomain || 'domain.com'}
+4. NEEDS_REVIEW: Only if NO domain found at all
+
+CRITICAL: Never use Gmail/Yahoo/Hotmail/Outlook — only use the company domain.
+CRITICAL: Never invent a domain you haven't seen in the data above.
 
 Return JSON:
 {
-  "email": "found or generated email",
-  "contact_name": "First Last or empty string",
-  "phone": "phone number or empty string",
+  "email": "the best email you found or generated",
+  "contact_name": "First Last if found in search results, else empty string",
+  "phone": "phone number if found, else empty string",
   "needs_review": false,
-  "source": "found_on_website | guessed | fallback | needs_review"
+  "source": "found_on_website | guessed | fallback | needs_review",
+  "confidence": "high | medium | low"
 }`
 
   const result = await groqJson(env, prompt, 'You extract contact information. Return valid JSON.', 500)
@@ -497,6 +557,7 @@ export async function leadGenApprovalGate(ctx) {
 
   if (!emailDraft.subject) throw new Error('Missing emailDraft in payload')
 
+  const senderEmail = await resolveSecret(env.SENDER_EMAIL) || 'sales@stellarglobalsupplies.com'
   const approvalId = crypto.randomUUID()
   const emailToken = crypto.randomUUID().replace(/-/g, '')
   const now        = nowIso()

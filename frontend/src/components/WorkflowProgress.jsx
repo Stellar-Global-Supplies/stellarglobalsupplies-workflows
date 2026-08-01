@@ -50,14 +50,16 @@ export const LEAD_GEN_STEPS = {
   lead_tavily_scrape_website:  'Scraping company website',
   lead_groq_extract_email:     'Extracting contact email',
   lead_save:                   'Saving lead to database',
-  lead_bedrock_draft_email:    'AI drafting outreach email',
-  lead_send_email:             'Sending outreach email',
+  lead_gen_draft_email:        'AI drafting outreach email',
+  lead_gen_approval_gate:      'Sending for approval',
+  lead_gen_send_email:         'Sending outreach email',
 }
 
 export const LEAD_EMAIL_STEPS = {
-  lead_load_existing:       'Loading lead data',
-  lead_bedrock_draft_email: 'AI drafting outreach email',
-  lead_send_email:          'Sending outreach email',
+  lead_load_existing:          'Loading lead data',
+  lead_bedrock_draft_email:    'AI drafting outreach email',
+  lead_approval_gate:          'Sending for approval',
+  lead_send_email:             'Sending outreach email',
 }
 
 // ── Status colours ─────────────────────────────────────────────────────────
@@ -100,7 +102,7 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
         setJobs(data.jobs || [])
         setRunStatus(data.status || 'running')
 
-        const terminal = ['succeeded','failed','awaiting_approval'].includes(data.status)
+        const terminal = ['succeeded','failed','awaiting_approval','stopped'].includes(data.status)
         if (terminal && !doneRef.current) {
           doneRef.current = true
           clearInterval(intervalRef.current)
@@ -141,12 +143,15 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
   const headerBg = hasFailed   ? 'bg-red-600'
     : isApproval  ? 'bg-amber-500'
     : isSuccess   ? 'bg-emerald-600'
+    : isStopped   ? 'bg-slate-600'
     : isPaused    ? 'bg-slate-500'
     : 'bg-navy'
 
+  const isStopped   = runStatus === 'stopped'
   const headerLabel = hasFailed  ? 'Workflow failed'
     : isApproval ? 'Awaiting your approval'
     : isSuccess  ? 'Workflow complete'
+    : isStopped  ? 'Workflow stopped'
     : isPaused   ? 'Workflow paused'
     : 'Workflow running…'
 

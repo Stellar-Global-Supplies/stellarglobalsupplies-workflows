@@ -97,7 +97,7 @@ export default function SocialMediaPost() {
       const res = await startWorkflow(workflowType, payload)
       setActiveRunId(res.workflowRunId)
       qc.invalidateQueries(['social-posts'])
-      setTab('posts')
+      // Stay on launch tab so progress panel is visible
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -112,6 +112,9 @@ export default function SocialMediaPost() {
     } else if (status === 'succeeded') {
       toast.success('Post published successfully')
       qc.invalidateQueries({ queryKey: ['social-posts'] })
+      setTab('posts')
+    } else if (status === 'stopped') {
+      toast('Post already exists for this order — skipped', { icon: '⚠️' })
     } else if (status === 'failed') {
       toast.error('Workflow failed — check progress panel for details')
     }

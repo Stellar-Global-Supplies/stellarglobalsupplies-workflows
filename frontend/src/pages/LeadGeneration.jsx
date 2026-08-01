@@ -41,14 +41,16 @@ export default function LeadGeneration() {
   }
 
   function handleComplete(status) {
-    // Don't hide the progress panel — let user close it manually via X button
     if (status === 'awaiting_approval') {
-      toast.success('Lead generated — check Approval Queue to review and send email')
+      toast.success('Lead found — check Approval Queue to review and send email')
       qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
     } else if (status === 'succeeded') {
+      // Could be a real success or a duplicate skip — check jobs
       toast.success('Lead generation completed')
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
+    } else if (status === 'stopped') {
+      toast('Duplicate lead found — skipped', { icon: '⚠️' })
     } else if (status === 'failed') {
       toast.error('Workflow failed — check progress panel for details')
     }
@@ -85,13 +87,12 @@ export default function LeadGeneration() {
 
       {/* Hunter.io info bar */}
       {!activeRunId && (
-        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 text-sm text-amber-800">
+        <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-6 text-sm text-blue-800">
           <Info size={16} className="flex-shrink-0 mt-0.5" />
           <div>
-            <strong>Hunter.io Credit Policy — 50 searches/month:</strong> Each workflow first checks remaining credits.
-            If credits are above the minimum reserve (3), Hunter.io finds a <em>real verified email</em> for a real company domain.
-            When credits run low the workflow automatically falls back to an AI-generated free email (Gmail/Outlook/Yahoo)
-            so you never waste a credit on a duplicate or already-known domain.
+            <strong>Tavily + Groq + Bedrock lead pipeline:</strong> Tavily searches the real web for companies in your target industry,
+            Groq extracts structured contact data, and Bedrock drafts a personalised B2B outreach email.
+            You review and approve the lead + email before it sends. Duplicates are automatically skipped.
           </div>
         </div>
       )}
@@ -135,7 +136,7 @@ export default function LeadGeneration() {
                 : <><Play size={15} /> Generate Lead</>}
             </button>
             <div className="text-xs text-slate-400 text-center">
-              Workflow: AI generates company → Hunter.io email lookup → dedup check → save → draft email → await approval → send → schedule follow-up
+              Workflow: Tavily finds real companies → Groq extracts contact → dedup check → save → Bedrock drafts email → await your approval → send
             </div>
           </div>
         </div>
