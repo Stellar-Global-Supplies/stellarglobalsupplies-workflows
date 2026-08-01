@@ -298,8 +298,7 @@ stellar-global-supplies-workflows/
 │   └── schema.sql                # D1 database schema
 ├── supabase/
 │   └── migrations/               # Supabase SQL migrations
-├── terraform/                    # AWS infrastructure (legacy)
-├── docs/                         # Documentation
+├── docs/                         # Documentation & retirement scripts
 ├── DEPLOYMENT_GUIDE.md           # Detailed deployment instructions
 └── README.md                     # This file
 ```
