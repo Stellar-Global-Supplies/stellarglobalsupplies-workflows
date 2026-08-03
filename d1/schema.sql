@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS job_queue (
   workflow_type    TEXT NOT NULL,
   step_name        TEXT NOT NULL,
   status           TEXT NOT NULL DEFAULT 'pending'
-                   CHECK (status IN ('pending','running','done','failed','waiting_for_approval')),
+                   CHECK (status IN ('pending','running','done','failed','stopped','waiting_for_approval')),
   payload          TEXT NOT NULL DEFAULT '{}',   
   retry_count      INTEGER NOT NULL DEFAULT 0,
   error_msg        TEXT,
