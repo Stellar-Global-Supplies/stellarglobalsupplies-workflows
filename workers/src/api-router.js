@@ -625,8 +625,7 @@ const VALID_SCHEDULE_TYPES = ['lead-generation','lead-email-existing','social-pr
 function validateWorkflowInput(wfType, body) {
   switch (wfType) {
     case 'lead-generation':
-      if (!body.target_industry) return 'Missing required field: target_industry'
-      if (!body.target_country) return 'Missing required field: target_country'
+      if (!body.location && !body.target_country) return 'Missing required field: location'
       break
     case 'lead-email-existing':
       if (!body.leadId && !body.lead_id) return 'Missing required field: leadId'
