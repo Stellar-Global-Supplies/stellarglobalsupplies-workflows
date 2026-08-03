@@ -1,77 +1,177 @@
-import { useState } from 'react'
+import { useState }              from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { startWorkflow, getLeads } from '../services/api'
-import { PageHeader, StatusBadge, EmptyState, FormField, Skeleton } from '../components/ui'
+import { startWorkflow, getLeads }  from '../services/api'
+import { PageHeader, EmptyState, Skeleton } from '../components/ui'
 import WorkflowProgress, { LEAD_GEN_STEPS } from '../components/WorkflowProgress'
-import { Users, Play, ExternalLink, AlertCircle, Info } from 'lucide-react'
+import {
+  Users, MapPin, Play, RefreshCw,
+  Globe, Mail, Phone, Building2,
+  CheckCircle, Clock, AlertTriangle, Eye,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
-const INDUSTRIES = ['Manufacturing','Retail','Healthcare','Logistics','Construction','Education','Hospitality','Technology','Agriculture','Finance']
-const COUNTRIES  = ['India','United States','United Kingdom','Germany','UAE','Singapore','Australia','Canada','South Africa','Brazil']
+// ── Stellar products context (shown in UI so users understand what's targeted) ──
+const PRODUCTS = [
+  { name: 'MS Angles, Flats & Channels',  buyers: 'Steel fabricators, EPC contractors' },
+  { name: 'MS Pipes & Square Tubes',      buyers: 'HVAC, plumbing, furniture makers' },
+  { name: 'MS Sheet & Chequered Plate',   buyers: 'Press shops, auto ancillaries' },
+  { name: 'Stainless Steel Products',     buyers: 'Food processing, pharma, hospitality' },
+  { name: 'Industrial Fasteners',         buyers: 'OEM manufacturers, machine builders' },
+]
+
+const STATUS_CONFIG = {
+  pending:      { label: 'Pending',      dot: 'bg-amber-400',   text: 'text-amber-700',   bg: 'bg-amber-50'   },
+  emailed:      { label: 'Emailed',      dot: 'bg-emerald-400', text: 'text-emerald-700', bg: 'bg-emerald-50' },
+  needs_review: { label: 'Needs Review', dot: 'bg-slate-400',   text: 'text-slate-600',   bg: 'bg-slate-50'   },
+  converted:    { label: 'Converted',    dot: 'bg-blue-400',    text: 'text-blue-700',     bg: 'bg-blue-50'    },
+  rejected:     { label: 'Rejected',     dot: 'bg-red-400',     text: 'text-red-600',      bg: 'bg-red-50'     },
+}
+
+// ── Quick location presets ────────────────────────────────────────────────────
+const PRESETS = [
+  'Pune, Maharashtra',
+  'Mumbai, Maharashtra',
+  'Chennai, Tamil Nadu',
+  'Ahmedabad, Gujarat',
+  'Bengaluru, Karnataka',
+  'Hyderabad, Telangana',
+  'Delhi NCR',
+  'Coimbatore, Tamil Nadu',
+  'Surat, Gujarat',
+  'Rajkot, Gujarat',
+]
 
 export default function LeadGeneration() {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ target_industry: 'Manufacturing', target_country: 'India', additional_context: '' })
-  const [running, setRunning] = useState(false)
-  const [emailingId, setEmailingId] = useState(null)
-  const [tab, setTab] = useState('launch')
+  const [location,    setLocation]    = useState('')
+  const [launching,   setLaunching]   = useState(false)
   const [activeRunId, setActiveRunId] = useState(null)
+  const [statusFilter, setStatusFilter] = useState('all')
 
-  const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['leads'],
-    queryFn:  () => getLeads('order=created_at.desc&limit=50'),
-    refetchInterval: 15_000,
+  const { data, isLoading, refetch } = useQuery({
+    queryKey:       ['leads', statusFilter],
+    queryFn:        () => getLeads(
+      statusFilter === 'all' ? 'order=created_at.desc&limit=100'
+                             : `status=eq.${statusFilter}&order=created_at.desc&limit=100`
+    ),
+    refetchInterval: 30_000,
   })
-  const leads = leadsData?.leads || []
+  const leads = data?.leads || []
 
-  async function launch() {
-    setRunning(true)
+  async function handleLaunch(e) {
+    e?.preventDefault()
+    const loc = location.trim()
+    if (!loc) { toast.error('Please enter a location'); return }
+
+    setLaunching(true)
     setActiveRunId(null)
     try {
-      const res = await startWorkflow('lead-generation', form)
+      const res = await startWorkflow('lead-generation', { location: loc })
       setActiveRunId(res.workflowRunId)
-      toast.success(`Workflow started — run ID: ${res.workflowRunId?.slice(0,8)}`)
-    } catch (e) {
-      toast.error(e.message)
-      setActiveRunId(null)
+    } catch (err) {
+      toast.error(err.message)
     } finally {
-      setRunning(false)
+      setLaunching(false)
     }
   }
 
   function handleComplete(status) {
-    // Don't hide the progress panel — let user close it manually via X button
     if (status === 'awaiting_approval') {
-      toast.success('Lead generated — check Approval Queue to review and send email')
+      toast.success('Lead found — check Approval Queue to review and send email')
       qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
     } else if (status === 'succeeded') {
-      toast.success('Lead generation completed')
+      toast.success('Lead saved — needs email review')
       qc.invalidateQueries({ queryKey: ['leads'] })
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    } else if (status === 'stopped') {
+      toast('Company already in database — skipped', { icon: '⚠️' })
     } else if (status === 'failed') {
       toast.error('Workflow failed — check progress panel for details')
     }
+    qc.invalidateQueries({ queryKey: ['leads'] })
+    qc.invalidateQueries({ queryKey: ['dashboard'] })
   }
 
-  async function draftFromLead(lead) {
-    setEmailingId(lead.id)
-    try {
-      const res = await startWorkflow('lead-email-existing', { leadId: lead.id })
-      toast.success(`Email draft workflow started — run ID: ${res.workflowRunId?.slice(0,8)}`)
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
-    } catch (e) {
-      toast.error(e.message)
-    } finally {
-      setEmailingId(null)
-    }
-  }
+  const FILTERS = ['all','pending','emailed','needs_review','converted','rejected']
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <PageHeader icon={Users} title="Lead Generation" sub="Tavily finds real companies · Groq extracts contacts · Bedrock drafts email · you approve · Gmail sends" />
+      <PageHeader icon={Users} title="Lead Generation"
+        sub="Enter a location — AI finds real buyer companies for Stellar's products and drafts a personalised outreach email">
+        <button onClick={() => refetch()} className="btn-secondary">
+          <RefreshCw size={14} /> Refresh
+        </button>
+      </PageHeader>
 
-      {/* Live progress panel — shows when a workflow is running */}
+      {/* ── Launch Panel ─────────────────────────────────────────────────── */}
+      <div className="card p-5 mb-5">
+        <p className="text-sm font-semibold text-navy mb-4 flex items-center gap-2">
+          <MapPin size={15} className="text-amber" /> Find Leads by Location
+        </p>
+
+        {/* Location input */}
+        <div className="flex gap-3 mb-4">
+          <div className="relative flex-1">
+            <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleLaunch()}
+              placeholder="e.g. Pune, Mumbai, Chennai, Ahmedabad…"
+              className="input pl-8 w-full"
+            />
+          </div>
+          <button
+            onClick={handleLaunch}
+            disabled={launching || !location.trim()}
+            className="btn-primary gap-2 px-5 disabled:opacity-50 whitespace-nowrap">
+            {launching
+              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Finding…</>
+              : <><Play size={14} />Find Lead</>
+            }
+          </button>
+        </div>
+
+        {/* Quick presets */}
+        <div className="flex flex-wrap gap-1.5 mb-5">
+          {PRESETS.map(p => (
+            <button key={p}
+              onClick={() => setLocation(p)}
+              className={`px-2.5 py-1 rounded-full text-xs border transition-colors
+                ${location === p
+                  ? 'bg-navy text-white border-navy'
+                  : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* Product targeting info */}
+        <div className="border border-slate-100 rounded-xl overflow-hidden">
+          <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-100">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              What the AI targets — rotates automatically across each run
+            </p>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {PRODUCTS.map(p => (
+              <div key={p.name} className="flex items-center gap-4 px-4 py-2.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber flex-shrink-0" />
+                <span className="text-xs font-medium text-navy w-52 flex-shrink-0">{p.name}</span>
+                <span className="text-xs text-slate-400">{p.buyers}</span>
+              </div>
+            ))}
+          </div>
+          <div className="bg-blue-50 px-4 py-2.5 border-t border-blue-100">
+            <p className="text-xs text-blue-700">
+              <strong>How it works:</strong> Each run automatically selects a different product category and buyer industry
+              for your location — so running it multiple times finds diverse leads across all 5 product lines.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Live Progress ─────────────────────────────────────────────────── */}
       {activeRunId && (
         <div className="mb-5">
           <WorkflowProgress
@@ -83,111 +183,105 @@ export default function LeadGeneration() {
         </div>
       )}
 
-      {/* Lead gen info bar */}
-      {!activeRunId && (
-        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 text-sm text-amber-800">
-          <Info size={16} className="flex-shrink-0 mt-0.5" />
-          <div>
-            <strong>Real lead pipeline:</strong> Tavily searches the live web for companies in your target industry, Groq extracts contact data, Bedrock drafts a personalised B2B outreach email. You review and approve before it sends. Duplicates are automatically skipped.
+      {/* ── Leads Table ──────────────────────────────────────────────────── */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
+          <span className="text-sm font-semibold text-navy">
+            Leads ({leads.length})
+          </span>
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
+            {FILTERS.map(f => (
+              <button key={f} onClick={() => setStatusFilter(f)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-colors
+                  ${statusFilter === f ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-navy'}`}>
+                {f.replace(/_/g, ' ')}
+              </button>
+            ))}
           </div>
         </div>
-      )}
 
-      {/* Tabs */}
-      {!activeRunId && (
-        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit mb-6">
-          {['launch','leads'].map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize
-                ${tab === t ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              {t === 'leads' ? `All Leads (${leads.length})` : 'Launch Workflow'}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {tab === 'launch' && !activeRunId && (
-        <div className="card p-6 max-w-lg">
-          <h2 className="font-semibold text-navy mb-4">New Lead Search</h2>
-          <div className="space-y-4">
-            <FormField label="Target Industry">
-              <select value={form.target_industry} onChange={e => setForm(f => ({...f, target_industry: e.target.value}))} className="input">
-                {INDUSTRIES.map(i => <option key={i}>{i}</option>)}
-              </select>
-            </FormField>
-            <FormField label="Target Country / Region">
-              <select value={form.target_country} onChange={e => setForm(f => ({...f, target_country: e.target.value}))} className="input">
-                {COUNTRIES.map(c => <option key={c}>{c}</option>)}
-              </select>
-            </FormField>
-            <FormField label="Additional Context (optional)" hint="e.g. 'mid-size companies, procurement managers'">
-              <textarea value={form.additional_context} onChange={e => setForm(f => ({...f, additional_context: e.target.value}))}
-                className="input resize-none h-20" placeholder="Any specific targeting details…" />
-            </FormField>
+        {isLoading ? (
+          <div className="p-4 space-y-2">
+            {Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-16" />)}
           </div>
+        ) : leads.length === 0 ? (
+          <EmptyState icon={Users}
+            title={statusFilter === 'all' ? 'No leads yet' : `No ${statusFilter.replace(/_/g,' ')} leads`}
+            sub="Enter a location above and click Find Lead to start generating prospects" />
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {leads.map(lead => {
+              const cfg = STATUS_CONFIG[lead.status] || STATUS_CONFIG.pending
+              return (
+                <div key={lead.id} className="px-5 py-4 hover:bg-slate-50/60 transition-colors">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${cfg.dot}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="font-semibold text-navy text-sm">{lead.company_name}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.text}`}>
+                          {cfg.label}
+                        </span>
+                        {lead.industry && (
+                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                            {lead.industry}
+                          </span>
+                        )}
+                        {lead.needs_review && (
+                          <span className="flex items-center gap-1 text-xs text-amber-600">
+                            <AlertTriangle size={10} /> Needs review
+                          </span>
+                        )}
+                      </div>
 
-          <div className="mt-5 flex flex-col gap-3">
-            <button onClick={launch} disabled={running} className="btn-primary justify-center py-2.5">
-              {running ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Starting…</>
-                : <><Play size={15} /> Generate Lead</>}
-            </button>
-            <div className="text-xs text-slate-400 text-center">
-              Workflow: Tavily finds real company → Groq extracts contact → dedup check → save → Bedrock drafts email → await approval → Gmail sends
-            </div>
-          </div>
-        </div>
-      )}
+                      <div className="flex items-center gap-4 flex-wrap text-xs text-slate-500">
+                        {lead.contact_name && (
+                          <span className="flex items-center gap-1">
+                            <Users size={11} />{lead.contact_name}
+                            {lead.contact_role ? ` · ${lead.contact_role}` : ''}
+                          </span>
+                        )}
+                        {lead.email && (
+                          <a href={`mailto:${lead.email}`}
+                            className="flex items-center gap-1 hover:text-navy transition-colors">
+                            <Mail size={11} />{lead.email}
+                          </a>
+                        )}
+                        {lead.phone && (
+                          <a href={`tel:${lead.phone}`}
+                            className="flex items-center gap-1 hover:text-navy transition-colors">
+                            <Phone size={11} />{lead.phone}
+                          </a>
+                        )}
+                        {lead.website && (
+                          <a href={lead.website} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 hover:text-navy transition-colors">
+                            <Globe size={11} />{lead.website.replace(/^https?:\/\/(www\.)?/, '')}
+                          </a>
+                        )}
+                        {lead.address && (
+                          <span className="flex items-center gap-1">
+                            <MapPin size={11} />{lead.address}
+                          </span>
+                        )}
+                        <span className="text-slate-300">
+                          {formatDistanceToNow(new Date(lead.created_at), { addSuffix: true })}
+                        </span>
+                      </div>
 
-      {tab === 'leads' && !activeRunId && (
-        <div className="card overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-slate-100 text-sm font-medium text-navy">
-            All Leads ({leads.length})
-          </div>
-          {isLoading ? (
-            <div className="p-4 space-y-3">{Array(5).fill(0).map((_,i) => <Skeleton key={i} className="h-14"/>)}</div>
-          ) : leads.length === 0 ? (
-            <EmptyState icon={Users} title="No leads yet" sub="Launch a workflow to generate your first lead" />
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {leads.map(lead => (
-                <div key={lead.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50 transition-colors">
-                  <div className="w-8 h-8 rounded-full bg-navy/10 flex items-center justify-center text-navy text-xs font-bold flex-shrink-0">
-                    {lead.company_name?.[0]?.toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-navy truncate">{lead.company_name}</span>
-                      {lead.source && lead.source !== 'needs_review' && (
-                        <span className="badge bg-blue-50 text-blue-700 border border-blue-200 text-xs capitalize">{lead.source.replace(/_/g,' ')}</span>
+                      {lead.description && (
+                        <p className="mt-1.5 text-xs text-slate-400 italic line-clamp-2">
+                          {lead.description}
+                        </p>
                       )}
                     </div>
-                    <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
-                      <span>{lead.email}</span>
-                      <span className="text-slate-300">·</span>
-                      <span>{lead.industry}</span>
-                      <span className="text-slate-300">·</span>
-                      <span>{formatDistanceToNow(new Date(lead.created_at), { addSuffix: true })}</span>
-                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={lead.status} />
-                    <button onClick={() => draftFromLead(lead)} disabled={emailingId === lead.id}
-                      className="btn-secondary text-xs py-1.5">
-                      {emailingId === lead.id ? 'Starting…' : 'Draft Email'}
-                    </button>
-                  </div>
-                  {lead.website && (
-                    <a href={lead.website} target="_blank" rel="noopener noreferrer"
-                      className="text-slate-400 hover:text-navy transition-colors">
-                      <ExternalLink size={14} />
-                    </a>
-                  )}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

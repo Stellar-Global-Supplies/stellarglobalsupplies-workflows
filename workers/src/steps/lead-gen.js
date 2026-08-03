@@ -1,26 +1,40 @@
 /**
- * Lead Generation — Step Handlers
- * Ports: generate_leads.py + check_duplicate.py + save_lead.py
- *        + draft_email.py + send_email.py + schedule_followup.py
+ * Lead Generation — Optimised Pipeline
  *
- * Steps (per Migration.md Phase 4f):
- *   lead_tavily_find_company    → Tavily search for real companies (1 credit)
- *   lead_groq_extract_company   → Groq extracts structured company JSON
- *   lead_check_duplicate        → query Supabase leads, skip if domain exists
- *   lead_tavily_find_contact    → Tavily search LinkedIn + company (1 credit)
- *   lead_tavily_scrape_website  → Tavily scrape contact page (1 credit)
- *   lead_groq_extract_email     → Groq extracts email with fallback chain
- *   lead_save                   → insert lead row into Supabase
- *   lead_bedrock_draft_email    → Bedrock writes personalised B2B outreach
- *   lead_send_email             → send + schedule followup job
+ * Input: location only (city, state, or country)
+ * Goal: find companies in that location who are BUYERS of Stellar's products
  *
- * Required secrets on stellar-job-runner:
- *   SUPABASE_URL, SUPABASE_SERVICE_KEY
- *   BEDROCK_ACCESS_KEY_ID, BEDROCK_SECRET_ACCESS_KEY, BEDROCK_REGION
- *   GROQ_API_KEY
- *   TAVILY_API_KEY
- *   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN
- *   SENDER_EMAIL
+ * Stellar Global Supplies products:
+ *   MILD STEEL:       MS Angles, MS Flats, MS Round Pipes, MS Sheet, MS Square Tubes,
+ *                     MS Channels, MS Chequered Plate, MS Galvanised Sheets
+ *   STAINLESS STEEL:  SS Sheets, SS Plates, SS Round Bars, SS Round Pipes, SS Channels
+ *   LOCKING/FASTENING: MS NYLOCK Nuts, Internal Circlips (DIN 472), External Circlips (DIN 471),
+ *                      Nordlock Washers, Hex Bolts, Allen Bolts, Lock Nuts, Washers, Dowel Pins
+ *
+ * Buyer industries (who uses our products):
+ *   Manufacturers, fabricators, construction companies, auto ancillaries,
+ *   engineering workshops, EPC contractors, infrastructure companies,
+ *   plant & machinery makers, pharmaceutical plant builders,
+ *   food processing equipment makers, HVAC companies, furniture manufacturers
+ *
+ * Steps:
+ *   lead_select_product_and_industry  → Groq picks best product + industry match for location
+ *   lead_tavily_find_buyers           → Tavily finds real companies buying that product
+ *   lead_groq_extract_company         → Groq extracts structured company data
+ *   lead_check_duplicate              → skip if already in DB
+ *   lead_tavily_find_contact          → Tavily finds procurement/purchase decision maker
+ *   lead_tavily_scrape_website        → Tavily scrapes website for email/phone
+ *   lead_groq_extract_email           → Groq extracts best email with fallback chain
+ *   lead_save                         → save to Supabase
+ *   lead_gen_draft_email              → Bedrock drafts product-specific outreach
+ *   lead_gen_approval_gate            → email notification + dashboard approval
+ *   lead_gen_send_email               → send approved email via Gmail
+ *
+ * Required secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY,
+ *   BEDROCK_ACCESS_KEY_ID, BEDROCK_SECRET_ACCESS_KEY, BEDROCK_REGION,
+ *   GROQ_API_KEY, TAVILY_API_KEY,
+ *   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN,
+ *   SENDER_EMAIL, REVIEWER_EMAIL, API_BASE_URL
  */
 
 import { bedrockGenerateJson } from '../lib/bedrock.js'
@@ -28,470 +42,558 @@ import { getClient }           from '../lib/supabase.js'
 import { nowIso }              from '../lib/utils.js'
 import { nextJob, insertApprovalGate } from '../job-runner.js'
 
-// Helper to resolve Cloudflare secrets (handles both string and secret objects)
 async function resolveSecret(val) {
   if (!val) return undefined
   if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
-  if (typeof val === 'string') return val
   return String(val)
 }
 
-const GROQ_BASE = 'https://api.groq.com/openai/v1/chat/completions'
+const GROQ_BASE  = 'https://api.groq.com/openai/v1/chat/completions'
 const TAVILY_BASE = 'https://api.tavily.com'
 
-const COMPANY_NAME = 'Stellar Global Supplies'
-const COMPANY_DESC = 'Stellar Global Supplies is a global B2B supplier of industrial, commercial, and office supplies. Bulk procurement, competitive pricing, reliable logistics, and dedicated account management for businesses worldwide.'
+// ── Stellar product catalogue ─────────────────────────────────────────────────
+
+const STELLAR_PRODUCTS = {
+  'MS Angles & Channels': {
+    buyers: ['structural fabricators', 'construction companies', 'EPC contractors', 'building material dealers'],
+    search_terms: ['steel structure fabrication', 'construction material procurement', 'structural steel buyer'],
+    product_pitch: 'MS Angles (various sizes) and MS Channels for structural applications — competitive bulk pricing from Pune',
+  },
+  'MS Pipes & Tubes': {
+    buyers: ['plumbing contractors', 'HVAC companies', 'process piping fabricators', 'furniture manufacturers'],
+    search_terms: ['MS pipe procurement', 'steel tube buyer', 'pipe fittings contractor'],
+    product_pitch: 'MS Round Pipes and MS Square Tubes — seamless supply for fluid and structural applications',
+  },
+  'MS Sheet & Plate': {
+    buyers: ['sheet metal fabricators', 'press shop manufacturers', 'auto ancillaries', 'engineering workshops'],
+    search_terms: ['MS sheet metal fabrication', 'press shop mild steel buyer', 'auto parts manufacturer'],
+    product_pitch: 'MS Sheets, Chequered Plates, and Galvanised Sheets — quality verified, bulk orders welcome',
+  },
+  'Stainless Steel Products': {
+    buyers: ['food processing equipment makers', 'pharma plant builders', 'chemical plant fabricators', 'hotel & hospitality equipment makers'],
+    search_terms: ['stainless steel fabrication buyer', 'SS equipment manufacturer', 'food grade steel procurement'],
+    product_pitch: 'SS 304/316/202 Sheets, Round Bars, and Pipes — food grade, pharma grade, corrosion resistant',
+  },
+  'Industrial Fasteners': {
+    buyers: ['OEM manufacturers', 'machine builders', 'automotive assembly', 'heavy engineering companies'],
+    search_terms: ['industrial fastener buyer OEM', 'nut bolt procurement manufacturer', 'assembly line fastener supplier'],
+    product_pitch: 'NYLOCK Nuts, Circlips (DIN 471/472), Nordlock Washers, Hex & Allen Bolts — Grade 8.8 and above',
+  },
+}
+
+const SKIP_DOMAINS = new Set([
+  'linkedin.com','indeed.com','glassdoor.com','naukri.com','justdial.com',
+  'wikipedia.org','facebook.com','twitter.com','instagram.com','youtube.com',
+  'indiamart.com','tradeindia.com','exportersindia.com','alibaba.com',
+  'amazon.in','flipkart.com','google.com','bing.com','yahoo.com',
+])
 
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Helper: Call Groq API
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Groq helpers ──────────────────────────────────────────────────────────────
 
-async function groqJson(env, prompt, system, maxTokens = 600) {
+async function groqJson(env, prompt, system, maxTokens = 800) {
   const apiKey = await resolveSecret(env.GROQ_API_KEY)
   if (!apiKey) throw new Error('Missing secret: GROQ_API_KEY')
-  
+
   const res = await fetch(GROQ_BASE, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({
-      model:    'llama-3.3-70b-versatile',
-      messages: [
-        { role: 'system', content: system || 'You are a helpful assistant. Return valid JSON.' },
+    method:  'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      model:           'llama-3.3-70b-versatile',
+      messages:        [
+        { role: 'system', content: system || 'Return valid JSON only. No preamble, no markdown.' },
         { role: 'user',   content: prompt },
       ],
-      temperature: 0.3,
-      max_tokens:  maxTokens,
+      temperature:     0.2,
+      max_tokens:      maxTokens,
       response_format: { type: 'json_object' },
     }),
   })
-  if (!res.ok) {
-    const t = await res.text()
-    throw new Error(`Groq API error ${res.status}: ${t}`)
-  }
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
   const data = await res.json()
   return JSON.parse(data.choices[0].message.content)
 }
 
-async function groqText(env, prompt, system, maxTokens = 300) {
-  const apiKey = await resolveSecret(env.GROQ_API_KEY)
-  if (!apiKey) throw new Error('Missing secret: GROQ_API_KEY')
-  
-  const res = await fetch(GROQ_BASE, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({
-      model:    'llama-3.3-70b-versatile',
-      messages: [
-        { role: 'system', content: system || 'You are a helpful assistant.' },
-        { role: 'user',   content: prompt },
-      ],
-      temperature: 0.3,
-      max_tokens:  maxTokens,
-    }),
-  })
-  if (!res.ok) {
-    const t = await res.text()
-    throw new Error(`Groq API error ${res.status}: ${t}`)
-  }
-  const data = await res.json()
-  return data.choices[0].message.content
-}
 
+// ── Tavily helpers ────────────────────────────────────────────────────────────
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Helper: Call Tavily API
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function tavilySearch(env, query, searchDepth = 'basic') {
+async function tavilySearch(env, query, depth = 'basic', maxResults = 5) {
   const apiKey = await resolveSecret(env.TAVILY_API_KEY)
   if (!apiKey) throw new Error('Missing secret: TAVILY_API_KEY')
-  
+
   const res = await fetch(`${TAVILY_BASE}/search`, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key:     apiKey,
-      query,
-      search_depth: searchDepth,
-      max_results: 5,
-    }),
+    body:    JSON.stringify({ api_key: apiKey, query, search_depth: depth, max_results: maxResults }),
   })
-  if (!res.ok) {
-    const t = await res.text()
-    throw new Error(`Tavily API error ${res.status}: ${t}`)
-  }
+  if (!res.ok) throw new Error(`Tavily ${res.status}: ${await res.text()}`)
   return res.json()
 }
 
+function cleanDomain(url) {
+  try { return new URL(url).hostname.replace(/^www\./, '') }
+  catch { return '' }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 1: Tavily — Find Real Companies
-// Ports: generate_leads.py _ai_generate_company (Tavily replaces Nova for search)
+// Step 1: Select Best Product + Industry for Location
+// Uses Groq to decide which product category and buyer industry
+// is most relevant for the given location — no user input needed for this
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function leadTavilyFindCompany(ctx) {
+export async function leadSelectProductAndIndustry(ctx) {
   const { payload, env } = ctx
-  const industry = payload.target_industry || 'manufacturing'
-  const country  = payload.target_country  || 'India'
-  const extra    = payload.additional_context || ''
+  const location = (payload.location || 'Pune, Maharashtra, India').trim()
 
-  // Use multiple targeted Tavily searches to find real companies
-  const queries = [
-    `${industry} company ${country} procurement buyer B2B supplier contact`,
-    `${industry} manufacturer importer ${country} wholesale bulk orders site:linkedin.com OR site:indiamart.com OR site:kompass.com`,
-    extra ? `${industry} ${extra} ${country} company contact email` : `${industry} ${country} procurement manager company official website`,
-  ]
+  // Rotate through product categories — use a simple hash of the run ID
+  // so different runs target different products even for the same location
+  const productKeys  = Object.keys(STELLAR_PRODUCTS)
+  const runId        = ctx.workflow_run_id || crypto.randomUUID()
+  const idx          = parseInt(runId.replace(/-/g, '').slice(0, 4), 16) % productKeys.length
+  const selectedProduct = productKeys[idx]
+  const productData     = STELLAR_PRODUCTS[selectedProduct]
 
-  const allResults = []
-  for (const query of queries.slice(0, 2)) {  // 2 Tavily credits max
-    try {
-      const result = await tavilySearch(env, query)
-      allResults.push(...(result.results || []))
-    } catch (e) {
-      console.warn(`[lead_tavily_find_company] query failed: ${e.message}`)
-    }
-  }
+  const prompt = `You are a B2B sales intelligence expert for Stellar Global Supplies, based in Pune, India.
+Stellar sells these products: ${selectedProduct} — ${productData.product_pitch}
 
-  // Deduplicate by domain and filter out directories/job sites
-  const SKIP_DOMAINS = ['linkedin.com','indeed.com','glassdoor.com','naukri.com','justdial.com',
-    'wikipedia.org','facebook.com','twitter.com','instagram.com','youtube.com']
-  const seen = new Set()
-  const companies = []
+Location to target: ${location}
 
-  for (const r of allResults) {
-    try {
-      const url = new URL(r.url)
-      const domain = url.hostname.replace(/^www\./, '')
-      if (seen.has(domain)) continue
-      if (SKIP_DOMAINS.some(d => domain.includes(d))) continue
-      seen.add(domain)
-      companies.push({
-        company_name: r.title?.replace(/ [-|·].*$/, '').replace(/ - .*$/, '').trim() || domain,
-        website:      `${url.protocol}//${url.hostname}`,
-        description:  (r.content || '').slice(0, 300),
-      })
-    } catch { /* skip invalid URLs */ }
-  }
+Based on the location, select the most relevant buyer type from this list:
+${productData.buyers.map((b, i) => `${i+1}. ${b}`).join('\n')}
 
-  if (!companies.length) {
-    throw new Error('Tavily returned no usable companies — try different industry or context')
-  }
+Also suggest the best search term to find these companies on the web.
 
-  console.log(`[lead_tavily_find_company] found ${companies.length} companies`)
+Return JSON:
+{
+  "selected_product":    "${selectedProduct}",
+  "selected_industry":   "chosen buyer type from the list",
+  "search_term":         "3-6 word web search to find these companies in ${location}",
+  "product_pitch":       "${productData.product_pitch}",
+  "why_this_industry":   "one sentence explaining why this industry buys this product"
+}`
 
-  await nextJob(ctx, 'lead_groq_extract_company', {
-    companies,
-    target_industry: industry,
-    target_country:  country,
-    additional_context: extra,
+  const result = await groqJson(env, prompt,
+    'You are a B2B sales intelligence expert. Return valid JSON only.', 400)
+
+  console.log(`[lead_select] location=${location} product=${result.selected_product} industry=${result.selected_industry}`)
+
+  await nextJob(ctx, 'lead_tavily_find_buyers', {
+    location,
+    selected_product:  result.selected_product  || selectedProduct,
+    selected_industry: result.selected_industry || productData.buyers[0],
+    search_term:       result.search_term       || productData.search_terms[0],
+    product_pitch:     result.product_pitch     || productData.product_pitch,
+    why_this_industry: result.why_this_industry || '',
   })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 2: Groq — Extract Structured Company Data
+// Step 2: Tavily — Find Real Buyer Companies
+// Targeted searches using product-specific buyer terms + location
+// Uses 2 Tavily credits max
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function leadTavilyFindBuyers(ctx) {
+  const { payload, env } = ctx
+  const location  = payload.location        || 'India'
+  const industry  = payload.selected_industry || 'manufacturing'
+  const searchTerm = payload.search_term    || 'steel buyer manufacturer'
+  const product   = payload.selected_product || 'MS Angles & Channels'
+
+  // Two targeted queries — one company-focused, one buyer-intent-focused
+  const queries = [
+    `${industry} company ${location} official website procurement contact`,
+    `${searchTerm} ${location} company buy supply requirement`,
+  ]
+
+  const allResults = []
+  for (const query of queries) {
+    try {
+      const result = await tavilySearch(env, query, 'basic', 7)
+      allResults.push(...(result.results || []))
+    } catch (e) {
+      console.warn(`[lead_tavily_find_buyers] query failed: ${e.message}`)
+    }
+  }
+
+  // Deduplicate by domain, skip directories and irrelevant sites
+  const seen      = new Set()
+  const companies = []
+
+  for (const r of allResults) {
+    const domain = cleanDomain(r.url)
+    if (!domain || seen.has(domain)) continue
+    if ([...SKIP_DOMAINS].some(skip => domain.includes(skip))) continue
+    seen.add(domain)
+    companies.push({
+      company_name: (r.title || domain)
+        .replace(/ [-|·–—].*$/, '')
+        .replace(/\s+(India|Pvt|Ltd|Private|Limited|Inc|Corp|LLP).*$/i, '')
+        .trim()
+        .slice(0, 80),
+      website:      `https://${domain}`,
+      description:  (r.content || '').slice(0, 400),
+      domain,
+    })
+    if (companies.length >= 3) break  // Take top 3 unique companies
+  }
+
+  if (!companies.length) {
+    throw new Error(`No buyer companies found in ${location} for ${product}`)
+  }
+
+  // Pick the most relevant company using Groq
+  const pickPrompt = `Stellar Global Supplies sells ${product} to buyers in ${location}.
+
+Here are companies found:
+${companies.map((c, i) => `${i+1}. ${c.company_name} (${c.domain})\n   ${c.description.slice(0, 200)}`).join('\n\n')}
+
+Pick the company MOST likely to be an actual buyer of ${product}.
+Prefer companies that:
+- Are manufacturers, fabricators, or contractors (not dealers/distributors)
+- Have a real website (not a directory page)
+- Are based in or near ${location}
+- Show signs of using steel, pipes, fasteners, or structural materials
+
+Return JSON:
+{
+  "selected_index": 0,
+  "confidence":     "high | medium | low",
+  "reason":         "one sentence why this company is a good prospect"
+}`
+
+  let selectedIdx = 0
+  try {
+    const pick = await groqJson(env, pickPrompt, 'Pick the best B2B lead. Return JSON only.', 200)
+    selectedIdx = Math.min(parseInt(pick.selected_index) || 0, companies.length - 1)
+    console.log(`[lead_tavily_find_buyers] picked idx=${selectedIdx} confidence=${pick.confidence} reason=${pick.reason}`)
+  } catch (e) {
+    console.warn(`[lead_tavily_find_buyers] company selection failed, using first result: ${e.message}`)
+  }
+
+  const company = companies[selectedIdx]
+  console.log(`[lead_tavily_find_buyers] selected=${company.company_name} domain=${company.domain}`)
+
+  await nextJob(ctx, 'lead_groq_extract_company', {
+    ...payload,
+    company,
+    companies,
+  })
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 3: Groq — Extract Structured Company Data
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadGroqExtractCompany(ctx) {
   const { payload, env } = ctx
-  const companies = payload.companies || []
-  const industry  = payload.target_industry || 'manufacturing'
-  const country   = payload.target_country  || 'India'
+  const company   = payload.company || payload.companies?.[0] || {}
+  const location  = payload.location || 'India'
+  const industry  = payload.selected_industry || ''
 
-  if (!companies.length) throw new Error('No companies to extract')
+  if (!company.company_name) throw new Error('No company data to extract')
 
-  const company = companies[0]  // Take the first one
+  const prompt = `Extract structured B2B lead data for Stellar Global Supplies (industrial supply company, Pune, India).
 
-  const prompt = `You are a B2B sales intelligence AI for ${COMPANY_NAME}.
-${COMPANY_DESC}
-
-Extract structured data from this company:
+Company info found:
 - Name: ${company.company_name}
 - Website: ${company.website}
+- Domain: ${company.domain}
 - Description: ${company.description}
+- Location context: ${location}
+- Industry context: ${industry}
 
-Return a JSON object with these fields:
+Extract and return JSON:
 {
-  "company_name": "${company.company_name}",
-  "website": "${company.website || 'https://example.com'}",
-  "industry": "${industry}",
-  "address": "realistic address in ${country}",
-  "description": "${company.description || `A company in the ${industry} industry in ${country}`}"
+  "company_name":  "official full company name",
+  "website":       "${company.website}",
+  "domain":        "${company.domain}",
+  "industry":      "${industry}",
+  "country":       "India",
+  "address":       "city and state if found in description, else '${location}'",
+  "description":   "2-3 sentence description of what this company does and why they'd buy industrial steel/fasteners",
+  "why_prospect":  "one line: specific product from Stellar they would need and why"
 }`
 
-  const extracted = await groqJson(env, prompt, 'You extract structured company data. Return valid JSON.', 500)
-  console.log(`[lead_groq_extract_company] extracted company=${extracted.company_name}`)
+  const extracted = await groqJson(env, prompt,
+    'Extract structured B2B lead data. Be accurate — only use what is in the source. Return JSON only.', 500)
+
+  console.log(`[lead_groq_extract_company] company=${extracted.company_name}`)
 
   await nextJob(ctx, 'lead_check_duplicate', {
-    lead: extracted,
+    ...payload,
+    lead: {
+      ...extracted,
+      source: 'tavily_search',
+    },
   })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 3: Check Duplicate
-// Ports: check_duplicate.py
+// Step 4: Check Duplicate
+// Skip if company name or domain already in DB
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadCheckDuplicate(ctx) {
   const { payload, env } = ctx
-  const lead = payload.lead || {}
-  const email        = (lead.email || '').toLowerCase().trim()
-  const companyName  = (lead.company_name || '').toLowerCase().trim()
+  const lead        = payload.lead || {}
+  const sb          = getClient(env)
+  const companyName = (lead.company_name || '').toLowerCase().trim()
+  const domain      = lead.domain || cleanDomain(lead.website || '')
 
-  const sb = getClient(env)
-
-  // Check by email
   let isDuplicate = false
   let existingId  = null
 
-  if (email) {
-    const byEmail = await sb.select('leads', `email=eq.${encodeURIComponent(email)}&select=id,email,status&limit=1`)
-    if (byEmail.length) {
-      isDuplicate = true
-      existingId  = byEmail[0].id
-    }
+  // Check by domain (most reliable)
+  if (domain) {
+    const byDomain = await sb.select('leads',
+      `website=ilike.${encodeURIComponent(`%${domain}%`)}&select=id,company_name,status&limit=1`
+    )
+    if (byDomain.length) { isDuplicate = true; existingId = byDomain[0].id }
   }
 
-  // Check by company name
-  if (!isDuplicate && companyName) {
-    const byName = await sb.select('leads', `company_name=ilike.${encodeURIComponent(`%${companyName}%`)}&select=id,company_name,status&limit=1`)
-    if (byName.length) {
-      isDuplicate = true
-      existingId  = byName[0].id
-    }
+  // Check by company name if no domain match
+  if (!isDuplicate && companyName.length > 3) {
+    const byName = await sb.select('leads',
+      `company_name=ilike.${encodeURIComponent(`%${companyName}%`)}&select=id,company_name,status&limit=1`
+    )
+    if (byName.length) { isDuplicate = true; existingId = byName[0].id }
   }
 
   if (isDuplicate) {
-    console.log(`[lead_check_duplicate] duplicate found existingId=${existingId} — skipping`)
+    console.log(`[lead_check_duplicate] duplicate existingId=${existingId} — stopping`)
     if (ctx.workflow_run_id) {
       await ctx.d1.update('workflow_runs', {
-        status:       'succeeded',
+        status:       'stopped',
         completed_at: nowIso(),
         output:       { duplicate_found: true, existing_id: existingId, message: 'Duplicate lead — skipped' },
       }, { id: ctx.workflow_run_id })
-      // Also mark the current job done so it shows correctly in progress panel
       await ctx.d1.update('job_queue', {
-        status:       'done',
-        completed_at: nowIso(),
-        error_msg:    'Duplicate lead — skipped',
+        status: 'done', completed_at: nowIso(), error_msg: 'Duplicate — skipped',
       }, { id: ctx.job.id })
     }
     return
   }
 
-  console.log(`[lead_check_duplicate] no duplicate found — continuing`)
-  await nextJob(ctx, 'lead_tavily_find_contact', { lead })
+  console.log(`[lead_check_duplicate] no duplicate — continuing`)
+  await nextJob(ctx, 'lead_tavily_find_contact', { ...payload })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 4: Tavily — Find Contact
+// Step 5: Tavily — Find Procurement Contact
+// 1 Tavily credit — targeted at procurement/purchase decision maker
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadTavilyFindContact(ctx) {
   const { payload, env } = ctx
-  const lead = payload.lead || {}
+  const lead    = payload.lead    || {}
+  const company = lead.company_name || ''
+  const domain  = lead.domain || cleanDomain(lead.website || '')
 
-  const queries = [
-    `"${lead.company_name}" procurement manager director contact email`,
-    `"${lead.company_name}" site:linkedin.com`,
-  ]
+  // Targeted: find procurement/purchase person at this specific company
+  const query = `"${company}" procurement purchase manager director contact${domain ? ` site:${domain} OR site:linkedin.com` : ''}`
 
-  const allResults = []
-  for (const q of queries.slice(0, 1)) {  // 1 Tavily credit
-    try {
-      const result = await tavilySearch(env, q)
-      allResults.push(...(result.results || []))
-    } catch (e) {
-      console.warn(`[lead_tavily_find_contact] query failed: ${e.message}`)
-    }
+  let contacts = []
+  try {
+    const result = await tavilySearch(env, query, 'basic', 5)
+    contacts = (result.results || []).slice(0, 5).map(r => ({
+      title:   r.title   || '',
+      content: r.content || '',
+      url:     r.url     || '',
+    }))
+  } catch (e) {
+    console.warn(`[lead_tavily_find_contact] search failed: ${e.message}`)
   }
 
-  const contacts = allResults.slice(0, 5).map(r => ({
-    title:   r.title || '',
-    content: r.content || '',
-    url:     r.url || '',
-  }))
+  console.log(`[lead_tavily_find_contact] found ${contacts.length} contact results`)
 
-  console.log(`[lead_tavily_find_contact] found ${contacts.length} potential contacts`)
-
-  await nextJob(ctx, 'lead_tavily_scrape_website', {
-    lead,
-    contacts,
-  })
+  await nextJob(ctx, 'lead_tavily_scrape_website', { ...payload, contacts })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 5: Tavily — Scrape Website
+// Step 6: Tavily — Scrape Company Website
+// 1 Tavily credit — scrapes contact/about page for email/phone
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadTavilyScrapeWebsite(ctx) {
   const { payload, env } = ctx
-  const lead     = payload.lead || {}
+  const lead     = payload.lead    || {}
   const contacts = payload.contacts || []
 
-  // Try to scrape the company website for contact info
   let scrapedContent = ''
   if (lead.website) {
     try {
-      const searchResult = await tavilySearch(env, `${lead.website} contact email phone`, 'advanced')
-      scrapedContent = (searchResult.results || []).map(r => r.content || '').join('\n').slice(0, 2000)
+      const result = await tavilySearch(env,
+        `${lead.website} contact email phone address`,
+        'advanced', 3
+      )
+      scrapedContent = (result.results || [])
+        .map(r => r.content || '')
+        .join('\n')
+        .slice(0, 3000)
     } catch (e) {
       console.warn(`[lead_tavily_scrape_website] scrape failed: ${e.message}`)
     }
   }
 
-  console.log(`[lead_tavily_scrape_website] scraped ${scrapedContent.length} chars`)
+  console.log(`[lead_tavily_scrape_website] scraped ${scrapedContent.length} chars from ${lead.website}`)
 
-  await nextJob(ctx, 'lead_groq_extract_email', {
-    lead,
-    contacts,
-    scrapedContent,
-  })
+  await nextJob(ctx, 'lead_groq_extract_email', { ...payload, scrapedContent })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 6: Groq — Extract Email with Fallback Chain
-// Ports: generate_leads.py _ai_generate_free_email
-// Email fallback chain (from Migration.md):
-//   Found email on website?          → use it
-//   Other emails found at domain?    → guess firstname@domain.com
-//   Domain known, no emails?         → procurement@domain.com
-//   Nothing found?                   → mark needs_review, skip send
+// Step 7: Groq — Extract Email + Contact
+// Strict fallback chain — never invents Gmail/Yahoo addresses
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadGroqExtractEmail(ctx) {
   const { payload, env } = ctx
-  const lead           = payload.lead || {}
-  const contacts       = payload.contacts || []
+  const lead           = payload.lead           || {}
+  const contacts       = payload.contacts       || []
   const scrapedContent = payload.scrapedContent || ''
 
-  // Extract all emails from scraped content using regex first
-  const emailRegexGlobal = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
-  const foundEmails = [
-    ...(scrapedContent.match(emailRegexGlobal) || []),
-    ...contacts.map(c => c.content.match(emailRegexGlobal) || []).flat(),
-  ].filter(e => !e.includes('sentry') && !e.includes('example') && !e.includes('noreply'))
+  // Pre-extract emails from scraped text using regex
+  const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
+  const domain     = lead.domain || cleanDomain(lead.website || '')
 
-  // Get domain from website for fallback
-  let companyDomain = ''
-  try {
-    companyDomain = new URL(lead.website || '').hostname.replace(/^www\./, '')
-  } catch { /* ignore */ }
+  const allText    = [scrapedContent, ...contacts.map(c => c.content)].join('\n')
+  const foundEmails = [...new Set((allText.match(emailRegex) || [])
+    .filter(e =>
+      !e.includes('sentry') && !e.includes('example') &&
+      !e.includes('noreply') && !e.includes('@gmail') &&
+      !e.includes('@yahoo') && !e.includes('@hotmail') &&
+      (domain ? e.endsWith(domain) || e.includes(domain.split('.')[0]) : true)
+    )
+  )].slice(0, 5)
 
-  const prompt = `You are a B2B sales intelligence AI. Extract or generate a contact email for procurement/purchasing at this company.
+  console.log(`[lead_groq_extract_email] regex found emails: ${foundEmails.join(', ') || 'none'}`)
+
+  const prompt = `You are a B2B sales intelligence AI for Stellar Global Supplies.
 
 Company: ${lead.company_name}
-Website: ${lead.website || 'N/A'}
-Domain: ${companyDomain || 'N/A'}
-Industry: ${lead.industry || 'N/A'}
+Website: ${lead.website}
+Domain: ${domain}
+Industry: ${lead.industry}
 
-Emails found in search results: ${foundEmails.slice(0, 10).join(', ') || 'none'}
+Emails already found by regex: ${foundEmails.join(', ') || 'none'}
 
 Contact search results:
-${contacts.map(c => `- ${c.title}\n  ${c.content.slice(0, 300)}`).join('\n\n')}
+${contacts.slice(0, 4).map(c => `- ${c.title}\n  ${c.content.slice(0, 300)}`).join('\n\n')}
 
-Scraped website content:
-${scrapedContent.slice(0, 1200)}
+Scraped website content (first 1500 chars):
+${scrapedContent.slice(0, 1500)}
 
-Email selection rules (strict priority):
-1. FOUND: If a real email at ${companyDomain || 'the company domain'} is in the lists above, use it
-2. GUESSED: If first/last name found but no email, guess firstname@${companyDomain || 'domain.com'} or firstname.lastname@${companyDomain || 'domain.com'}
-3. FALLBACK: If domain is known (${companyDomain || 'N/A'}), use procurement@${companyDomain || 'domain.com'} or sales@${companyDomain || 'domain.com'}
-4. NEEDS_REVIEW: Only if NO domain found at all
+TASK: Find the best procurement/purchase contact email and name.
 
-CRITICAL: Never use Gmail/Yahoo/Hotmail/Outlook — only use the company domain.
-CRITICAL: Never invent a domain you haven't seen in the data above.
+STRICT EMAIL RULES — follow this chain in order:
+1. FOUND: Use an email from the regex list above if it belongs to ${domain}
+2. FOUND: Extract any email from the content that belongs to ${domain}
+3. GUESSED: If a person's name is found, guess firstname@${domain || 'domain.com'}
+4. FALLBACK: Use procurement@${domain || 'domain.com'} or purchase@${domain || 'domain.com'}
+5. NEEDS_REVIEW: Only if domain is completely unknown
+
+CRITICAL RULES:
+- NEVER use @gmail.com, @yahoo.com, @hotmail.com, @outlook.com addresses
+- NEVER invent a domain not present in the data above
+- For contact_name: use actual names found, never invent one
+- For phone: extract Indian format numbers (+91 or 0XX) only if clearly present
 
 Return JSON:
 {
-  "email": "the best email you found or generated",
-  "contact_name": "First Last if found in search results, else empty string",
-  "phone": "phone number if found, else empty string",
+  "email":        "best email following the chain above",
+  "contact_name": "First Last if found, else empty string",
+  "contact_role": "procurement manager | purchase manager | director | CEO | empty string",
+  "phone":        "phone number if clearly found, else empty string",
   "needs_review": false,
-  "source": "found_on_website | guessed | fallback | needs_review",
-  "confidence": "high | medium | low"
+  "source":       "found_on_website | found_in_search | guessed_from_name | fallback_procurement | needs_review",
+  "confidence":   "high | medium | low"
 }`
 
-  const result = await groqJson(env, prompt, 'You extract contact information. Return valid JSON.', 500)
+  const result = await groqJson(env, prompt,
+    'Extract B2B contact info. NEVER use Gmail/Yahoo/Hotmail. Return JSON only.', 500)
 
-  const email = (result.email || '').toLowerCase().trim()
-  
-  // Validate email format
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  const isValidEmail = emailRegex.test(email)
-  
-  if (!isValidEmail) {
-    console.warn(`[lead_groq_extract_email] invalid email format: ${email}`)
-  }
-  
-  const needsReview = !isValidEmail || result.needs_review || !email
+  const email      = (result.email || '').toLowerCase().trim()
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
+                     !email.endsWith('@gmail.com') &&
+                     !email.endsWith('@yahoo.com') &&
+                     !email.endsWith('@hotmail.com') &&
+                     !email.endsWith('@outlook.com')
+
+  const needsReview = !emailValid || result.needs_review
 
   const enrichedLead = {
     ...lead,
-    email:        email || '',
-    contact_name: result.contact_name || lead.contact_name || '',
-    phone:        result.phone || lead.phone || '',
-    source:       result.source || 'ai_generated',
+    email:        emailValid ? email : '',
+    contact_name: result.contact_name  || '',
+    contact_role: result.contact_role  || '',
+    phone:        result.phone         || '',
+    source:       result.source        || 'tavily_search',
+    confidence:   result.confidence    || 'low',
     needs_review: needsReview,
   }
 
-  console.log(`[lead_groq_extract_email] email=${email || 'NONE'} source=${result.source} needs_review=${needsReview}`)
+  console.log(`[lead_groq_extract_email] email=${email || 'NONE'} source=${result.source} confidence=${result.confidence}`)
 
-  if (needsReview) {
-    // Save lead with needs_review status — no email will be sent
-    await nextJob(ctx, 'lead_save', { lead: enrichedLead, skipEmail: true })
-  } else {
-    await nextJob(ctx, 'lead_save', { lead: enrichedLead, skipEmail: false })
-  }
+  await nextJob(ctx, 'lead_save', { ...payload, lead: enrichedLead, skipEmail: needsReview })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 7: Save Lead
-// Ports: save_lead.py
+// Step 8: Save Lead to Supabase
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadSave(ctx) {
   const { payload, env } = ctx
-  const lead      = payload.lead || {}
+  const lead      = payload.lead      || {}
   const skipEmail = payload.skipEmail || false
-
-  const sb = getClient(env)
+  const sb        = getClient(env)
 
   const row = {
-    company_name:    lead.company_name || '',
-    website:         lead.website || '',
-    email:           (lead.email || '').toLowerCase().trim(),
-    phone:           lead.phone || '',
-    industry:        lead.industry || '',
-    address:         lead.address || '',
-    contact_name:    lead.contact_name || '',
-    description:     lead.description || '',
+    company_name:    (lead.company_name || '').slice(0, 255),
+    website:         (lead.website      || '').slice(0, 500),
+    email:           (lead.email        || '').toLowerCase().trim(),
+    phone:           (lead.phone        || '').slice(0, 50),
+    industry:        (lead.industry     || '').slice(0, 100),
+    country:         (lead.country      || 'India').slice(0, 100),
+    address:         (lead.address      || '').slice(0, 255),
+    contact_name:    (lead.contact_name || '').slice(0, 100),
+    description:     (lead.description  || '').slice(0, 500),
     status:          skipEmail ? 'needs_review' : 'pending',
-    source:          lead.source || 'ai_generated',
-    workflow_run_id: ctx.workflow_run_id || null,
+    source:          lead.source || 'tavily_search',
+    // Store extra metadata in description if room
   }
 
-  const saved = await sb.insert('leads', row)
-  console.log(`[lead_save] saved leadId=${saved.id} status=${row.status}`)
+  // Try inserting with all columns, fall back gracefully
+  let saved
+  try {
+    saved = await sb.insert('leads', { ...row, workflow_run_id: ctx.workflow_run_id })
+  } catch {
+    saved = await sb.insert('leads', row)
+  }
+
+  console.log(`[lead_save] saved leadId=${saved.id} company=${lead.company_name} skipEmail=${skipEmail}`)
 
   if (skipEmail) {
-    console.log(`[lead_save] lead needs review — no email will be sent`)
-    return  // Chain ends
+    // Mark workflow succeeded — lead saved but no email (needs manual review)
+    if (ctx.workflow_run_id) {
+      await ctx.d1.update('workflow_runs', {
+        status:       'succeeded',
+        completed_at: nowIso(),
+        output:       { lead_id: saved.id, needs_review: true, message: 'Lead saved — needs email review' },
+      }, { id: ctx.workflow_run_id })
+    }
+    return
   }
 
   await nextJob(ctx, 'lead_gen_draft_email', {
+    ...payload,
     lead:   { ...lead, id: saved.id },
     leadId: saved.id,
   })
@@ -499,45 +601,70 @@ export async function leadSave(ctx) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 8: Bedrock — Draft Outreach Email
-// Ports: draft_email.py
+// Step 9: Bedrock — Draft Product-Specific Outreach Email
+// Highly personalised — references the specific product they'd buy
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadGenBedrockDraftEmail(ctx) {
   const { payload, env } = ctx
-  const lead   = payload.lead || {}
-  const leadId = payload.leadId || lead.id
+  const lead            = payload.lead            || {}
+  const leadId          = payload.leadId          || lead.id
+  const selectedProduct = payload.selected_product || 'Industrial Steel Products'
+  const productPitch    = payload.product_pitch    || ''
+  const whyProspect     = lead.why_prospect        || `${lead.industry} companies use ${selectedProduct}`
 
   if (!lead.company_name) throw new Error('Missing lead data')
 
-  const prompt = `Draft a B2B outreach email from Stellar Global Supplies Team to ${lead.contact_name || 'the team'} at ${lead.company_name}.
+  const greeting = lead.contact_name
+    ? `Dear ${lead.contact_name.split(' ')[0]}`
+    : `Dear Procurement Team`
 
-Lead details:
-- Company: ${lead.company_name}
-- Industry: ${lead.industry || 'unknown'}
-- Website: ${lead.website || 'N/A'}
-- Description: ${lead.description || ''}
-- Location: ${lead.address || ''}
+  const prompt = `Write a professional B2B cold outreach email from Stellar Global Supplies to ${lead.company_name}.
 
-Our company (Stellar Global Supplies) offers:
-- Industrial, commercial, and office supplies in bulk
-- Competitive pricing with volume discounts
-- Global logistics and reliable delivery
-- Dedicated account manager
-- Website: https://stellarglobalsupplies.com
+SENDER: Stellar Global Supplies, Pune, India
+  - Products: ${selectedProduct}
+  - Specifics: ${productPitch}
+  - Website: https://stellarglobalsupplies.com
+  - Phone: +91 9637655556
+  - Address: Survey No-169, Talawade, Pune - 411062
 
-Return JSON with exactly these fields:
+RECIPIENT:
+  - Company: ${lead.company_name}
+  - Industry: ${lead.industry || 'manufacturing'}
+  - Location: ${lead.address || lead.country || 'India'}
+  - Contact: ${lead.contact_name || 'Procurement Team'}
+  - Role: ${lead.contact_role || 'procurement decision maker'}
+  - Why they'd buy from us: ${whyProspect}
+  - Company description: ${lead.description || ''}
+
+EMAIL REQUIREMENTS:
+1. Opening: ${greeting}, — reference their industry and why we're reaching out
+2. One specific pain point their industry faces in sourcing ${selectedProduct}
+3. How Stellar solves it — reference specific product specs/grades if relevant
+4. Our key differentiators: ISI/BIS certified, bulk pricing, pan-India delivery, 2-hour response time, 500+ SKUs
+5. Simple CTA: call +91 9637655556 or email back to get a quote within 24 hours
+6. Signature: Stellar Global Supplies Team | Pune | +91 9637655556 | stellarglobalsupplies.com
+7. Keep it under 200 words — concise, professional, not salesy
+8. No fluff like "I hope this email finds you well"
+
+Return JSON:
 {
-  "subject": "email subject line",
-  "body": "full email body with proper greeting, value proposition, CTA, and signature from Stellar Global Supplies Team"
+  "subject": "compelling subject line referencing their industry and our product",
+  "body":    "full email body — professional, specific, concise, under 200 words"
 }`
 
-  const draft = await bedrockGenerateJson(env, prompt,
-    'You are a professional B2B sales copywriter. Write concise, personalized outreach emails.', 1500)
+  const SYSTEM = `You are a senior B2B sales copywriter for Stellar Global Supplies.
+Write concise, personalised industrial supply outreach emails.
+Reference specific products, grades, and applications relevant to the recipient's industry.
+Be direct and professional. Never use "I hope this email finds you well."
+Return valid JSON only.`
 
-  console.log(`[lead_gen_bedrock_draft_email] drafted for lead=${leadId}`)
+  const draft = await bedrockGenerateJson(env, prompt, SYSTEM, 1200)
+
+  console.log(`[lead_gen_draft_email] drafted subject="${draft.subject}" for leadId=${leadId}`)
 
   await nextJob(ctx, 'lead_gen_approval_gate', {
+    ...payload,
     lead,
     leadId,
     emailDraft: draft,
@@ -546,7 +673,9 @@ Return JSON with exactly these fields:
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 9: Approval Gate
+// Step 10: Approval Gate
+// Sends email to REVIEWER_EMAIL with Approve/Reject buttons
+// Also creates approval_queue row for dashboard
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadGenApprovalGate(ctx) {
@@ -555,100 +684,118 @@ export async function leadGenApprovalGate(ctx) {
   const emailDraft = payload.emailDraft || {}
   const leadId     = payload.leadId     || lead.id
 
-  if (!emailDraft.subject) throw new Error('Missing emailDraft in payload')
+  if (!emailDraft.subject) throw new Error('Missing emailDraft — cannot create approval')
 
-  const senderEmail = await resolveSecret(env.SENDER_EMAIL) || 'sales@stellarglobalsupplies.com'
+  const senderEmail   = await resolveSecret(env.SENDER_EMAIL)   || 'sales@stellarglobalsupplies.com'
+  const reviewerEmail = await resolveSecret(env.REVIEWER_EMAIL)
+  const apiBase       = (await resolveSecret(env.API_BASE_URL) || '').replace(/\/$/, '')
+
   const approvalId = crypto.randomUUID()
   const emailToken = crypto.randomUUID().replace(/-/g, '')
   const now        = nowIso()
-  const apiBase    = (env.API_BASE_URL || '').replace(/\/$/, '')
+  const expiresAt  = new Date(Date.now() + 60 * 60 * 1000).toISOString()
 
+  const approveUrl = `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=approve`
+  const rejectUrl  = `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=reject`
+  const dashUrl    = `https://workflow.stellarglobalsupplies.com/approvals`
+
+  // Build preview HTML for dashboard modal
   const previewHtml = `
     <div style="font-family:Arial,sans-serif;max-width:600px">
-      <h2 style="color:#0A2547">New Lead — ${lead.company_name || ''}</h2>
-      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:20px">
-        <p><strong>Company:</strong> ${lead.company_name || ''}</p>
-        <p><strong>Contact:</strong> ${lead.contact_name || ''}</p>
-        <p><strong>Email:</strong> ${lead.email || ''}</p>
-        <p><strong>Phone:</strong> ${lead.phone || ''}</p>
-        <p><strong>Industry:</strong> ${lead.industry || ''}</p>
-        <p><strong>Website:</strong> ${lead.website || ''}</p>
-        <p><strong>Source:</strong> ${lead.source || ''}</p>
-        <hr style="border:none;border-top:1px solid #E2E8F0"/>
-        <p><strong>Email Subject:</strong> ${emailDraft.subject || ''}</p>
-        <div style="white-space:pre-wrap;font-size:13px">${(emailDraft.body || '').slice(0, 400)}...</div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:20px;margin-bottom:16px">
+        <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#16a34a;text-transform:uppercase">Lead Details</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+          ${[['Company', lead.company_name],['Industry', lead.industry],
+             ['Website', lead.website],['Contact', lead.contact_name],
+             ['Email', lead.email],['Phone', lead.phone],
+             ['Location', lead.address],['Source', lead.source]
+            ].filter(([,v]) => v).map(([k,v]) => `
+            <div>
+              <div style="font-size:11px;color:#94a3b8">${k}</div>
+              <div style="font-size:13px;font-weight:500;color:#1e293b">${v}</div>
+            </div>`).join('')}
+        </div>
+        ${lead.description ? `<p style="margin:12px 0 0;font-size:12px;color:#64748b;font-style:italic">${lead.description}</p>` : ''}
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px">
+        <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase">Outreach Email Draft</p>
+        <p style="margin:10px 0 4px"><strong>Subject:</strong> ${emailDraft.subject || ''}</p>
+        <div style="white-space:pre-wrap;font-size:13px;color:#334155;margin-top:8px;line-height:1.6">
+          ${(emailDraft.body || '').slice(0, 600)}${(emailDraft.body || '').length > 600 ? '...' : ''}
+        </div>
       </div>
     </div>`
 
+  // Insert into D1 approval_queue
   await d1.insert('approval_queue', {
-    id:              approvalId,
-    workflow_type:   'lead_approval',
+    id:               approvalId,
+    workflow_type:    'lead_generation',
     workflow_run_id,
-    reference_id:    leadId || null,
-    task_token:      `lead-gen-${crypto.randomUUID()}`,
-    payload:         { lead, leadId, emailDraft, approvalGate: 'save', _nextStep: 'lead_gen_send_email' },
-    preview_html:    previewHtml,
-    status:          'pending',
-    email_token:     emailToken,
-    token_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-    created_at:      now,
+    reference_id:     leadId || null,
+    task_token:       `lead-gen-${workflow_run_id}`,
+    payload:          {
+      lead, leadId, emailDraft,
+      selected_product:  payload.selected_product,
+      product_pitch:     payload.product_pitch,
+      approvalGate:      'save',
+      _nextStep:         'lead_gen_send_email',
+    },
+    preview_html:     previewHtml,
+    status:           'pending',
+    email_token:      emailToken,
+    token_expires_at: expiresAt,
+    created_at:       now,
   })
 
-  console.log(`[lead_gen_approval_gate] approval_id=${approvalId} lead=${leadId}`)
+  console.log(`[lead_gen_approval_gate] created approvalId=${approvalId} lead=${leadId}`)
 
-  // Send notification email to reviewer
-  try {
-    const reviewerEmail = await resolveSecret(env.REVIEWER_EMAIL)
-    if (reviewerEmail) {
-      await sendLeadApprovalNotification(env, {
-        to:          reviewerEmail,
-        approvalId,
-        emailToken,
-        approveUrl:  `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=approve`,
-        rejectUrl:   `${apiBase}/approvals/${approvalId}/email-action?token=${emailToken}&action=reject`,
-        lead,
-        emailDraft,
-        senderEmail,
+  // Send email notification to reviewer
+  if (reviewerEmail && apiBase) {
+    try {
+      await sendLeadApprovalEmail(env, {
+        to: reviewerEmail, senderEmail,
+        approvalId, approveUrl, rejectUrl, dashUrl,
+        lead, emailDraft,
+        product: payload.selected_product || 'Industrial Products',
       })
+      console.log(`[lead_gen_approval_gate] notification sent to=${reviewerEmail}`)
+    } catch (e) {
+      console.warn(`[lead_gen_approval_gate] notification failed (non-fatal): ${e.message}`)
     }
-  } catch (e) {
-    console.warn(`[lead_gen_approval_gate] notification email failed: ${e.message}`)
-    // Don't throw — approval row is already created, workflow can continue via dashboard
   }
 
-  await d1.update('job_queue', { status: 'waiting_for_approval' }, { id: job.id })
-  if (workflow_run_id) {
-    await d1.update('workflow_runs', { status: 'awaiting_approval' }, { id: workflow_run_id })
-  }
+  // Pause job
+  await d1.update('job_queue',    { status: 'waiting_for_approval' }, { id: job.id })
+  await d1.update('workflow_runs',{ status: 'awaiting_approval'    }, { id: workflow_run_id })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 10: Send Email
-// Ports: send_email.py + schedule_followup.py
+// Step 11: Send Approved Email via Gmail
+// Triggered by api-router on approval
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadGenSendEmail(ctx) {
   const { payload, env } = ctx
-  const lead       = payload.lead       || {}
-  const emailDraft = payload.emailDraft || {}
-  const leadId     = payload.leadId     || lead.id
+  const lead        = payload.lead       || {}
+  const emailDraft  = payload.emailDraft || {}
+  const leadId      = payload.leadId     || lead.id
   const senderEmail = await resolveSecret(env.SENDER_EMAIL) || 'sales@stellarglobalsupplies.com'
 
-  const to      = lead.email || ''
-  const subject = emailDraft.subject || 'Outreach'
-  const body    = emailDraft.body    || ''
+  const to      = (payload.email?.to || lead.email || '').trim()
+  const subject = payload.email?.subject || emailDraft.subject || 'Industrial Supply Partnership'
+  const body    = payload.email?.body    || emailDraft.body    || ''
 
-  if (!to) throw new Error('No recipient email address for lead')
+  if (!to)     throw new Error('No recipient email for lead')
   if (!leadId) throw new Error('Missing leadId')
+  if (!body)   throw new Error('Missing email body')
 
-  // Send via Gmail
+  const html        = buildEmailHtml(subject, body, senderEmail)
   const accessToken = await getGmailToken(env)
-  const html        = buildPlainEmailHtml(subject, body)
   const result      = await sendViaGmail(accessToken, to, subject, html, senderEmail)
-  console.log(`[lead_gen_send_email] sent to=${to} leadId=${leadId} gmailId=${result.id}`)
 
-  // Update lead status
+  console.log(`[lead_gen_send_email] sent to=${to} leadId=${leadId} msgId=${result.id}`)
+
   const sb = getClient(env)
   try {
     await sb.update('leads', {
@@ -656,7 +803,7 @@ export async function leadGenSendEmail(ctx) {
       updated_at: nowIso(),
     }, `id=eq.${leadId}`)
   } catch (e) {
-    console.warn(`[lead_gen_send_email] lead status update failed: ${e.message}`)
+    console.warn(`[lead_gen_send_email] status update failed (non-fatal): ${e.message}`)
   }
 }
 
@@ -666,30 +813,23 @@ export async function leadGenSendEmail(ctx) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function getGmailToken(env) {
-  const clientId     = await resolveSecret(env.GMAIL_CLIENT_ID)
-  const clientSecret = await resolveSecret(env.GMAIL_CLIENT_SECRET)
-  const refreshToken = await resolveSecret(env.GMAIL_REFRESH_TOKEN)
-  
-  if (!clientId) throw new Error('Missing secret: GMAIL_CLIENT_ID')
-  if (!clientSecret) throw new Error('Missing secret: GMAIL_CLIENT_SECRET')
-  if (!refreshToken) throw new Error('Missing secret: GMAIL_REFRESH_TOKEN')
-  
+  const [clientId, clientSecret, refreshToken] = await Promise.all([
+    resolveSecret(env.GMAIL_CLIENT_ID),
+    resolveSecret(env.GMAIL_CLIENT_SECRET),
+    resolveSecret(env.GMAIL_REFRESH_TOKEN),
+  ])
+  if (!clientId)     throw new Error('Missing: GMAIL_CLIENT_ID')
+  if (!clientSecret) throw new Error('Missing: GMAIL_CLIENT_SECRET')
+  if (!refreshToken) throw new Error('Missing: GMAIL_REFRESH_TOKEN')
+
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body:    new URLSearchParams({
-      client_id:     clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type:    'refresh_token',
-    }),
+    body:    new URLSearchParams({ client_id: clientId, client_secret: clientSecret,
+                                   refresh_token: refreshToken, grant_type: 'refresh_token' }),
   })
-  if (!res.ok) {
-    const t = await res.text()
-    throw new Error(`Gmail token refresh failed ${res.status}: ${t}`)
-  }
-  const data = await res.json()
-  return data.access_token
+  if (!res.ok) throw new Error(`Gmail token ${res.status}: ${await res.text()}`)
+  return (await res.json()).access_token
 }
 
 async function sendViaGmail(accessToken, to, subject, html, sender) {
@@ -708,118 +848,127 @@ async function sendViaGmail(accessToken, to, subject, html, sender) {
 
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method:  'POST',
-    headers: {
-      Authorization:  `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ raw }),
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ raw }),
   })
-  if (!res.ok) {
-    const t = await res.text()
-    throw new Error(`Gmail send failed ${res.status}: ${t}`)
-  }
+  if (!res.ok) throw new Error(`Gmail send ${res.status}: ${await res.text()}`)
   return res.json()
 }
 
-async function sendLeadApprovalNotification(env, { to, approvalId, emailToken, approveUrl, rejectUrl, lead, emailDraft, senderEmail }) {
-  const companyName = lead.company_name || ''
-  const contactName = lead.contact_name || ''
-  const bodyPreview = (emailDraft.body || '').slice(0, 600)
-
-  const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0"
-        style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
-        <tr>
-          <td style="background:#0A2547;padding:24px 32px">
-            <div style="color:#F59E0B;font-size:20px;font-weight:bold">Stellar Global Supplies</div>
-            <div style="color:#94A8B8;font-size:13px;margin-top:4px">New Lead Approval Required</div>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:24px 32px 16px">
-            <div style="font-size:20px;font-weight:bold;color:#0A2547">
-              New Lead — ${companyName}
-            </div>
-            <div style="color:#64748B;font-size:14px;margin-top:6px">
-              Contact: <strong>${contactName}</strong> · Email: <strong>${lead.email || ''}</strong>
-            </div>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:0 32px 24px">
-            <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:20px;font-size:14px;color:#334155">
-              <p><strong>Company:</strong> ${companyName}</p>
-              <p><strong>Industry:</strong> ${lead.industry || ''}</p>
-              <p><strong>Website:</strong> ${lead.website || ''}</p>
-              <p><strong>Phone:</strong> ${lead.phone || ''}</p>
-              <hr style="border:none;border-top:1px solid #E2E8F0;margin:12px 0"/>
-              <p><strong>Email Subject:</strong> ${emailDraft.subject || ''}</p>
-              <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}${bodyPreview.length === 600 ? '...' : ''}</div>
-            </div>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:0 32px 32px">
-            <table width="100%"><tr>
-              <td width="48%" align="center">
-                <a href="${approveUrl}"
-                   style="display:block;background:#10B981;color:#fff;text-decoration:none;
-                          font-size:16px;font-weight:bold;padding:14px 20px;border-radius:8px;text-align:center">
-                  ✓ &nbsp; Approve & Send
-                </a>
-              </td>
-              <td width="4%"></td>
-              <td width="48%" align="center">
-                <a href="${rejectUrl}"
-                   style="display:block;background:#EF4444;color:#fff;text-decoration:none;
-                          font-size:16px;font-weight:bold;padding:14px 20px;border-radius:8px;text-align:center">
-                  ✕ &nbsp; Reject
-                </a>
-              </td>
-            </tr></table>
-            <div style="text-align:center;margin-top:16px;color:#94A8B8;font-size:12px">
-              Links expire in 1 hour. Also manage at
-              <a href="https://app.stellarglobalsupplies.com/approvals" style="color:#1565C0">the dashboard</a>.
-            </div>
-          </td>
-        </tr>
-        <tr>
-          <td style="background:#F8FAFC;border-top:1px solid #E2E8F0;padding:16px 32px;text-align:center">
-            <div style="color:#94A8B8;font-size:12px">Stellar Global Supplies · Pune, India</div>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>`
-
-  const accessToken = await getGmailToken(env)
-  await sendViaGmail(accessToken, to, `[Approval] New Lead — ${companyName}`, html, senderEmail)
-  console.log(`[lead_gen_approval_gate] notification sent to=${to}`)
-}
-
-function buildPlainEmailHtml(subject, body) {
+function buildEmailHtml(subject, body, sender) {
   const bodyHtml = body
-    .replace(/\n\n/g, `</p><p style="margin:14px 0;color:#1e293b;line-height:1.7;">`)
+    .replace(/\n\n/g, '</p><p style="margin:14px 0;color:#1e293b;line-height:1.7">')
     .replace(/\n/g, '<br>')
-
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-<div style="max-width:600px;margin:32px auto;background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden">
-  <div style="background:#0A2547;padding:24px 32px">
-    <div style="color:#fff;font-weight:700;font-size:16px">Stellar Global Supplies</div>
+<div style="max-width:580px;margin:32px auto;background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden">
+  <div style="background:#0A2547;padding:20px 28px;display:flex;align-items:center;gap:12px">
+    <div style="width:36px;height:36px;background:#F59E0B;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#0A2547;font-size:16px">S</div>
+    <div>
+      <div style="color:#fff;font-weight:700;font-size:15px">Stellar Global Supplies</div>
+      <div style="color:#94a3b8;font-size:11px">Industrial Supply Partner · Pune, India</div>
+    </div>
   </div>
-  <div style="padding:32px">
+  <div style="padding:28px">
     <p style="margin:14px 0;color:#1e293b;line-height:1.7">${bodyHtml}</p>
   </div>
-  <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 32px;text-align:center">
-    <p style="margin:0;font-size:12px;color:#94a3b8">Stellar Global Supplies · stellarglobalsupplies.com</p>
+  <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 28px;text-align:center">
+    <p style="margin:0;font-size:11px;color:#94a3b8">
+      Stellar Global Supplies · Survey No-169, Talawade, Pune 411062 · stellarglobalsupplies.com
+    </p>
   </div>
 </div>
 </body></html>`
+}
+
+async function sendLeadApprovalEmail(env, { to, senderEmail, approvalId, approveUrl, rejectUrl, dashUrl, lead, emailDraft, product }) {
+  const bodyPreview = (emailDraft.body || '').slice(0, 500)
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:28px 16px">
+<tr><td align="center">
+<table width="580" cellpadding="0" cellspacing="0"
+  style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
+  <tr>
+    <td style="background:#0A2547;padding:20px 28px">
+      <div style="color:#F59E0B;font-size:18px;font-weight:bold">Stellar Global Supplies</div>
+      <div style="color:#94A3B8;font-size:12px;margin-top:3px">New Lead — Approval Required</div>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:20px 28px 12px">
+      <div style="font-size:17px;font-weight:bold;color:#0A2547">${lead.company_name || 'New Lead'}</div>
+      <div style="color:#64748B;font-size:12px;margin-top:4px">
+        Product targeted: <strong>${product}</strong>
+      </div>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0 28px 16px">
+      <table width="100%" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0" cellpadding="12" cellspacing="0">
+        <tr><td>
+          <table width="100%" cellpadding="0" cellspacing="0">
+            ${[['Industry', lead.industry],['Website', lead.website],
+               ['Contact', lead.contact_name],['Email', lead.email],
+               ['Phone', lead.phone],['Location', lead.address]
+              ].filter(([,v]) => v).map(([k,v]) => `
+              <tr>
+                <td style="font-size:12px;color:#64748b;padding:3px 8px 3px 0;width:80px">${k}</td>
+                <td style="font-size:13px;color:#1e293b;font-weight:500;padding:3px 0">${v}</td>
+              </tr>`).join('')}
+          </table>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0 28px 20px">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px">
+        <p style="margin:0 0 8px;font-size:12px;font-weight:600;color:#64748b">OUTREACH EMAIL DRAFT</p>
+        <p style="margin:0 0 6px;font-size:13px"><strong>Subject:</strong> ${emailDraft.subject || ''}</p>
+        <div style="white-space:pre-wrap;font-size:13px;color:#334155;line-height:1.6;margin-top:8px">
+          ${bodyPreview}${bodyPreview.length >= 500 ? '...' : ''}
+        </div>
+      </div>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0 28px 28px">
+      <table width="100%"><tr>
+        <td width="48%" align="center">
+          <a href="${approveUrl}"
+             style="display:block;background:#10B981;color:#fff;text-decoration:none;
+                    font-size:14px;font-weight:bold;padding:12px 16px;border-radius:8px;text-align:center">
+            ✓ &nbsp; Approve & Send Email
+          </a>
+        </td>
+        <td width="4%"></td>
+        <td width="48%" align="center">
+          <a href="${rejectUrl}"
+             style="display:block;background:#EF4444;color:#fff;text-decoration:none;
+                    font-size:14px;font-weight:bold;padding:12px 16px;border-radius:8px;text-align:center">
+            ✕ &nbsp; Reject Lead
+          </a>
+        </td>
+      </tr></table>
+      <div style="text-align:center;margin-top:14px;color:#94A3B8;font-size:11px">
+        Links expire in 1 hour ·
+        <a href="${dashUrl}" style="color:#1565C0">View in dashboard</a>
+      </div>
+    </td>
+  </tr>
+  <tr>
+    <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:12px 28px;text-align:center">
+      <div style="color:#94A3B8;font-size:11px">Stellar Global Supplies · Pune, India · stellarglobalsupplies.com</div>
+    </td>
+  </tr>
+</table>
+</td></tr>
+</table>
+</body></html>`
+
+  const accessToken = await getGmailToken(env)
+  await sendViaGmail(accessToken, to, `[Lead Approval] ${lead.company_name || 'New Lead'} — ${product}`, html, senderEmail)
 }
