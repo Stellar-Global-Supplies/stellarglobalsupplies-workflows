@@ -637,7 +637,7 @@ function validateWorkflowInput(wfType, body) {
       if (!body.repo_name) return 'Missing required field: repo_name'
       break
     case 'blog':
-      if (!body.topic && !body.custom_topic) return 'Missing required field: topic or custom_topic'
+      if (!body.topic && !body.custom_topic && !body.product_name) return 'Missing required field: topic, custom_topic, or product_name'
       break
     case 'payment-followup':
       // No required fields - uses default parameters
