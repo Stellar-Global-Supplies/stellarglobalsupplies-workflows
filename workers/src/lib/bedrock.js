@@ -15,8 +15,41 @@ async function resolveSecret(val) {
 
 export async function bedrockGenerateJson(env, prompt, system = '', maxTokens = 2000) {
   const text = await bedrockInvoke(env, prompt, system, maxTokens)
-  const clean = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
-  return JSON.parse(clean)
+
+  // 1. Strip markdown code fences if present
+  let clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+
+  // 2. Try direct parse first
+  try {
+    return JSON.parse(clean)
+  } catch {}
+
+  // 3. Extract first complete JSON object or array — handles trailing text
+  const objMatch = clean.match(/(\{[\s\S]*\}|\[[\s\S]*\])/)
+  if (objMatch) {
+    try {
+      return JSON.parse(objMatch[1])
+    } catch {}
+  }
+
+  // 4. Last resort: find first '{' and last '}' (or first '[' and last ']')
+  const firstBrace = clean.indexOf('{')
+  const lastBrace  = clean.lastIndexOf('}')
+  const firstBrack = clean.indexOf('[')
+  const lastBrack  = clean.lastIndexOf(']')
+
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(clean.slice(firstBrace, lastBrace + 1))
+    } catch {}
+  }
+  if (firstBrack !== -1 && lastBrack > firstBrack) {
+    try {
+      return JSON.parse(clean.slice(firstBrack, lastBrack + 1))
+    } catch {}
+  }
+
+  throw new Error(`Invalid JSON from Bedrock: ${text.slice(0, 300)}...`)
 }
 
 export async function bedrockGenerateText(env, prompt, system = '', maxTokens = 2000) {
