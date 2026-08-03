@@ -561,7 +561,6 @@ export async function leadSave(ctx) {
     email:           (lead.email        || '').toLowerCase().trim(),
     phone:           (lead.phone        || '').slice(0, 50),
     industry:        (lead.industry     || '').slice(0, 100),
-    country:         (lead.country      || 'India').slice(0, 100),
     address:         (lead.address      || '').slice(0, 255),
     contact_name:    (lead.contact_name || '').slice(0, 100),
     description:     (lead.description  || '').slice(0, 500),
