@@ -34,7 +34,8 @@ import {
   leadSendEmail as leadEmailSendEmail,
 } from './steps/lead-email.js'
 import {
-  leadTavilyFindCompany,
+  leadSelectProductAndIndustry,
+  leadTavilyFindBuyers,
   leadGroqExtractCompany,
   leadCheckDuplicate,
   leadTavilyFindContact,
@@ -273,7 +274,8 @@ export async function insertApprovalGate(ctx, nextStep, approvalData) {
 const STEP_HANDLERS = {
 
   // ── Lead Generation ────────────────────────────────────────── LIVE ✓ ──
-  lead_tavily_find_company:    (ctx) => leadTavilyFindCompany(ctx),
+  lead_select_product_and_industry: (ctx) => leadSelectProductAndIndustry(ctx),
+  lead_tavily_find_buyers:          (ctx) => leadTavilyFindBuyers(ctx),
   lead_groq_extract_company:   (ctx) => leadGroqExtractCompany(ctx),
   lead_check_duplicate:        (ctx) => leadCheckDuplicate(ctx),
   lead_tavily_find_contact:    (ctx) => leadTavilyFindContact(ctx),

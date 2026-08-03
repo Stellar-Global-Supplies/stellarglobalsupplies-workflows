@@ -95,7 +95,7 @@ const VALID_WORKFLOW_TYPES = [
 ]
 
 const FIRST_STEP = {
-  'lead-generation':    'lead_tavily_find_company',
+  'lead-generation':    'lead_select_product_and_industry',
   'lead-email-existing':'lead_load_existing',
   'social-product':     'social_get_orders',
   'social-tech':        'social_get_orders',
