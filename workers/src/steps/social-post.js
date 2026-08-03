@@ -678,6 +678,7 @@ async function postFacebook(pageId, token, message, imageUrl) {
 async function postInstagram(igAccountId, token, caption, imageUrl) {
   const base = 'https://graph.facebook.com/v18.0'
 
+  // Step 1: Create media container
   const createRes = await fetch(`${base}/${igAccountId}/media`, {
     method: 'POST',
     body:   new URLSearchParams({ image_url: imageUrl, caption, access_token: token }),
@@ -687,12 +688,44 @@ async function postInstagram(igAccountId, token, caption, imageUrl) {
   const containerId = container.id
   if (!containerId) return { success: false, error: 'No container ID' }
 
-  const publishRes = await fetch(`${base}/${igAccountId}/media_publish`, {
+  // Step 2: Wait for container to be ready, then publish.
+  // Instagram needs time to process the media container — publishing
+  // immediately can fail with "Media ID is not available" / error 9007.
+  const maxAttempts = 6
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Check container status (polls the media object)
+    const statusRes = await fetch(`${base}/${containerId}?fields=status_code&access_token=${token}`)
+    if (statusRes.ok) {
+      const status = await statusRes.json()
+      // status_code "FINISHED" or "PUBLISHED" means we can publish
+      if (status.status_code === 'FINISHED' || status.status_code === 'PUBLISHED') {
+        const publishRes = await fetch(`${base}/${igAccountId}/media_publish`, {
+          method: 'POST',
+          body:   new URLSearchParams({ creation_id: containerId, access_token: token }),
+        })
+        if (publishRes.ok) return { success: true, result: await publishRes.json() }
+        // If publish failed but not due to "not ready", return the error
+        const errText = await publishRes.text()
+        if (!errText.includes('9007') && !errText.includes('Media ID')) {
+          return { success: false, error: errText }
+        }
+        // Otherwise fall through to retry
+      }
+    }
+
+    if (attempt < maxAttempts) {
+      // Wait 5 seconds between attempts (Worker CPU doesn't count sleep)
+      await new Promise(r => setTimeout(r, 5000))
+    }
+  }
+
+  // Final attempt without checking status
+  const finalRes = await fetch(`${base}/${igAccountId}/media_publish`, {
     method: 'POST',
     body:   new URLSearchParams({ creation_id: containerId, access_token: token }),
   })
-  if (!publishRes.ok) return { success: false, error: await publishRes.text() }
-  return { success: true, result: await publishRes.json() }
+  if (finalRes.ok) return { success: true, result: await finalRes.json() }
+  return { success: false, error: await finalRes.text() }
 }
 
 async function sendLinkedinEmail(env, { post, linkedinContent, imageUrl, title, notifyEmails }) {
