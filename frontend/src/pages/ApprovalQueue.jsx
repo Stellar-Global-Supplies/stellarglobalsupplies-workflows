@@ -171,7 +171,7 @@ function SocialPreviewTabs({ post, fullContent }) {
 
 function BlogPreview({ blog, fullContent }) {
   const merged = fullContent ? { ...blog, ...fullContent } : blog
-  const content = merged.content || ''
+  const content = merged.full_content || merged.content || ''
 
   // Convert markdown to basic HTML for preview
   const html = content
@@ -244,13 +244,14 @@ function SocialEditor({ post, edits, setEdits, fullContent }) {
 function BlogEditor({ blog, edits, setEdits, fullContent }) {
   const merged = fullContent ? { ...blog, ...fullContent } : blog
   const setField = (field, val) => setEdits(e => ({ ...e, blog: { ...(e.blog || {}), [field]: val } }))
+  const contentValue = edits.blog?.content ?? (merged.full_content || merged.content || '')
   return (
     <div className="space-y-4">
       <EditableField label="Title" value={edits.blog?.title ?? (merged.title || '')} onChange={val => setField('title', val)} />
       {merged.excerpt !== undefined && (
         <EditableField label="Excerpt" value={edits.blog?.excerpt ?? (merged.excerpt || '')} onChange={val => setField('excerpt', val)} multiline rows={2} />
       )}
-      <EditableField label="Content" value={edits.blog?.content ?? (merged.content || '')} onChange={val => setField('content', val)} multiline rows={20} mono />
+      <EditableField label="Content" value={contentValue} onChange={val => setField('content', val)} multiline rows={20} mono />
     </div>
   )
 }
@@ -263,6 +264,29 @@ function EmailEditor({ email, edits, setEdits }) {
         <EditableField label="Subject" value={edits.email?.subject ?? (email.subject || '')} onChange={val => setField('subject', val)} />
       )}
       <EditableField label="Body" value={edits.email?.body ?? (email.body || email.content || '')} onChange={val => setField('body', val)} multiline rows={14} />
+    </div>
+  )
+}
+
+// ─── Rendered email preview ───────────────────────────────────────────────────
+
+function EmailPreview({ email }) {
+  const subject = email.subject || ''
+  const body    = email.body || email.content || ''
+
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+      {/* Email header */}
+      <div className="bg-slate-50 border-b border-slate-100 px-5 py-3">
+        <p className="text-xs text-slate-400 mb-1">Subject</p>
+        <p className="text-sm font-semibold text-navy">{subject || '(no subject)'}</p>
+      </div>
+      {/* Email body */}
+      <div className="px-5 py-4">
+        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
+          {body || '(no body)'}
+        </div>
+      </div>
     </div>
   )
 }
@@ -421,8 +445,12 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
             ? <BlogPreview blog={blog} fullContent={fullContent} />
             : <BlogEditor blog={blog} edits={edits} setEdits={setEdits} fullContent={fullContent} />
         )}
+        {isBlog && !blog && item.preview_html && (
+          <div className="p-4 text-sm border border-slate-200 rounded-xl"
+               dangerouslySetInnerHTML={{ __html: item.preview_html }} />
+        )}
 
-        {/* LEAD APPROVAL — show lead card + email draft */}
+        {/* LEAD APPROVAL — show lead card + email draft with preview/edit toggle */}
         {isLeadApproval && (
           <div className="space-y-4">
             {lead && (
@@ -450,12 +478,31 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
                 )}
               </div>
             )}
-            {email
-              ? <EmailEditor email={email} edits={edits} setEdits={setEdits} />
-              : item.preview_html
-                ? <div className="p-4 text-sm border border-slate-200 rounded-xl" dangerouslySetInnerHTML={{ __html: item.preview_html }} />
-                : null
-            }
+            {email && (
+              <>
+                {/* Preview / Edit toggle */}
+                <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+                  <button onClick={() => setViewMode('preview')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                      ${viewMode === 'preview' ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                    <Eye size={12} />Preview
+                  </button>
+                  <button onClick={() => setViewMode('edit')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                      ${viewMode === 'edit' ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                    <Pencil size={12} />Edit
+                  </button>
+                </div>
+                {viewMode === 'edit' ? (
+                  <EmailEditor email={email} edits={edits} setEdits={setEdits} />
+                ) : (
+                  <EmailPreview email={email} />
+                )}
+              </>
+            )}
+            {!email && item.preview_html && (
+              <div className="p-4 text-sm border border-slate-200 rounded-xl" dangerouslySetInnerHTML={{ __html: item.preview_html }} />
+            )}
           </div>
         )}
 
