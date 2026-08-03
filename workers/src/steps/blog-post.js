@@ -1,134 +1,437 @@
 /**
- * Blog Post Workflow — Step Handlers
- * Ports: generate_blog.py + create_github_pr.py
+ * Blog Post Workflow — Optimised
  *
- * Steps:
- *   blog_generate_outline    → Bedrock generates structured outline JSON
- *   blog_generate_content    → Bedrock generates full markdown from outline
- *   blog_image_submit        → HF Gradio FLUX (same pattern as social)
- *   blog_image_poll          → poll FLUX result, upload to R2
- *   blog_create_github_pr    → GitHub API: create branch, commit MDX, open PR
+ * Input: optional product_name (if blank, auto-picks next unwritten product from Stellar catalogue)
  *
- * Required secrets on stellar-job-runner:
- *   SUPABASE_URL, SUPABASE_SERVICE_KEY
- *   BEDROCK_ACCESS_KEY_ID, BEDROCK_SECRET_ACCESS_KEY, BEDROCK_REGION
- *   GITHUB_TOKEN
- *   WEBSITE_REPO_OWNER, WEBSITE_REPO_NAME, WEBSITE_BASE_BRANCH
+ * Blog structure (fixed):
+ *   1. Introduction — what the product is and why it matters in Indian industry
+ *   2. Why This Product — common problems it solves, industry pain points
+ *   3. Use Cases — real applications across industries (construction, pharma, auto, etc.)
+ *   4. Why Stellar Global Supplies — promote Stellar with specs, certifications, pricing, delivery
+ *   5. Conclusion + CTA — call +91 9637655556 or visit stellarglobalsupplies.com
+ *
+ * SEO rules:
+ *   - Product name in title (first 60 chars)
+ *   - Product name + "Pune" / "India" / "supplier" in meta description
+ *   - Product name used naturally throughout, especially in H2 headings
+ *   - Internal link to stellarglobalsupplies.com and /promotional-products where relevant
+ *
+ * Auto-rotation: picks the next product not yet written about.
+ * Dedup: checks blog_posts table by product keyword before generating.
+ *
+ * All 20 products from stellarglobalsupplies.com:
+ * MS: Angles, Flats, Round Pipes, Sheet, Square Tubes, Channels, Chequered Plate, Galvanised Sheets
+ * SS: Sheets, Plates, Round Bars, Round Pipes, Channels, Circles
+ * L&F: MS NYLOCK Nuts, Internal Circlips DIN 472, External Circlips DIN 471,
+ *       Nordlock Washers, Hex Bolts, Allen Bolts, Lock Nuts, Washers, Dowel Pins
  */
 
 import { bedrockGenerateJson, bedrockGenerateText } from '../lib/bedrock.js'
 import { getClient }                                from '../lib/supabase.js'
 import { uploadImage, imageExtAndType }             from '../lib/assets.js'
+import { generateAndUploadImage }                   from '../lib/image-gen.js'
 import { nowIso, slugify }                          from '../lib/utils.js'
 import { nextJob, insertApprovalGate }              from '../job-runner.js'
 
-// Helper to resolve Cloudflare secrets (handles both string and secret objects)
 async function resolveSecret(val) {
   if (!val) return undefined
   if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
-  if (typeof val === 'string') return val
   return String(val)
 }
 
-const FLUX_BASE   = 'https://black-forest-labs-flux-1-schnell.hf.space'
-const MAX_RETRIES = 8
+// Image generation via Cloudflare Workers AI — synchronous, no polling
 
-const SYSTEM = `You are a professional content writer for Stellar Global Supplies, a global B2B supplier.
-Write informative, SEO-optimized blog posts that provide genuine value to procurement professionals,
-supply chain managers, and business owners. Use clear headings, practical advice, and professional tone.`
+// ── Complete Stellar product catalogue ───────────────────────────────────────
+
+const STELLAR_PRODUCTS = [
+  // Mild Steel
+  {
+    name:       'MS Angles',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-angles',
+    keywords:   ['MS angles', 'mild steel angles', 'structural steel angles', 'angle iron'],
+    industries: ['construction', 'steel fabrication', 'EPC contractors', 'infrastructure'],
+    specs:      'Available in various sizes from 20×20mm to 150×150mm, IS 2062 Grade',
+  },
+  {
+    name:       'MS Flats',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-flats',
+    keywords:   ['MS flats', 'mild steel flat bars', 'flat bar steel'],
+    industries: ['fabrication', 'engineering workshops', 'auto ancillaries', 'gates & grills'],
+    specs:      'Precision-rolled flat bars, multiple widths and thicknesses, IS 2062 Grade',
+  },
+  {
+    name:       'MS Round Pipes',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-round-pipes',
+    keywords:   ['MS round pipes', 'mild steel pipes', 'ERW pipes', 'MS circular pipes'],
+    industries: ['plumbing contractors', 'HVAC', 'structural applications', 'furniture manufacturing'],
+    specs:      'ERW (Electric Resistance Welded), IS 1239 compliant, various diameters',
+  },
+  {
+    name:       'MS Sheet',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-sheet',
+    keywords:   ['MS sheet', 'mild steel sheet', 'hot rolled sheet', 'CR sheet'],
+    industries: ['press shops', 'auto body shops', 'enclosure manufacturing', 'general fabrication'],
+    specs:      'Hot-rolled and cold-rolled, IS 2062, multiple gauges from 1.6mm to 12mm',
+  },
+  {
+    name:       'MS Square Tubes',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-square-tubes',
+    keywords:   ['MS square tubes', 'mild steel square tubes', 'hollow square sections', 'box sections'],
+    industries: ['furniture manufacturers', 'construction scaffolding', 'material handling equipment'],
+    specs:      'Hollow square sections, IS 4923, various sizes from 12×12mm to 100×100mm',
+  },
+  {
+    name:       'MS Channels',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-channels',
+    keywords:   ['MS channels', 'mild steel channels', 'C channels', 'steel channels'],
+    industries: ['structural fabrication', 'civil construction', 'purlins', 'support structures'],
+    specs:      'C-section channels, IS 2062, ISMC 75 to ISMC 300 series',
+  },
+  {
+    name:       'MS Chequered Plate',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-chequered-plate',
+    keywords:   ['MS chequered plate', 'chequered plate', 'anti-slip plate', 'diamond plate'],
+    industries: ['flooring for factories', 'ramps', 'stair treads', 'vehicle loading platforms'],
+    specs:      'IS 3502 compliant, raised pattern for anti-slip, 2.5mm to 8mm thickness',
+  },
+  {
+    name:       'MS Galvanised Sheets',
+    category:   'Mild Steel',
+    url_path:   '/products/ms-galvanised-sheets',
+    keywords:   ['MS galvanised sheets', 'galvanised steel', 'zinc coated sheets', 'GI sheets'],
+    industries: ['roofing contractors', 'agricultural equipment', 'outdoor structures', 'ducting'],
+    specs:      'Hot-dip galvanised, IS 277, zinc coating 120–275 gsm, various gauges',
+  },
+  // Stainless Steel
+  {
+    name:       'SS Sheets',
+    category:   'Stainless Steel',
+    url_path:   '/products/ss-sheets',
+    keywords:   ['SS sheets', 'stainless steel sheets', 'SS 304 sheets', 'SS 316 sheets'],
+    industries: ['food processing equipment', 'pharma plant fabrication', 'kitchen equipment', 'chemical tanks'],
+    specs:      'Grades 304, 316, 202 — 2B, No. 4, mirror finish — IS 6911 compliant',
+  },
+  {
+    name:       'SS Plates',
+    category:   'Stainless Steel',
+    url_path:   '/products/ss-plates',
+    keywords:   ['SS plates', 'stainless steel plates', 'SS 304 plates', 'thick SS plates'],
+    industries: ['pressure vessels', 'heat exchangers', 'heavy fabrication', 'defence equipment'],
+    specs:      'Grades 304 / 316 / 316L, 6mm to 100mm thickness, ASTM A240 compliant',
+  },
+  {
+    name:       'SS Round Bars',
+    category:   'Stainless Steel',
+    url_path:   '/products/ss-round-bars',
+    keywords:   ['SS round bars', 'stainless steel round bars', 'SS 304 bars', 'bright bars'],
+    industries: ['shaft manufacture', 'CNC machining', 'fastener manufacturing', 'marine hardware'],
+    specs:      'Grades 304, 316, 202, bright and black finish, 6mm to 150mm diameter',
+  },
+  {
+    name:       'SS Round Pipes',
+    category:   'Stainless Steel',
+    url_path:   '/products/ss-round-pipes',
+    keywords:   ['SS round pipes', 'stainless steel pipes', 'SS 304 pipes', 'food grade pipes'],
+    industries: ['dairy equipment', 'food processing lines', 'pharma piping', 'water treatment'],
+    specs:      'Grades 304 / 316, seamless and welded, IS 6911, sanitary and industrial finish',
+  },
+  {
+    name:       'SS Channels',
+    category:   'Stainless Steel',
+    url_path:   '/products/ss-channels',
+    keywords:   ['SS channels', 'stainless steel channels', 'SS C channels', 'SS structural'],
+    industries: ['food plant structures', 'clean room fabrication', 'marine structures', 'hospital equipment'],
+    specs:      'Grade 304 / 316, various ISMC sizes, mirror and 2B finish available',
+  },
+  // Locking & Fastening
+  {
+    name:       'MS NYLOCK Nuts',
+    category:   'Fasteners',
+    url_path:   '/promotional-products',
+    keywords:   ['NYLOCK nuts', 'nylon insert lock nuts', 'MS NYLOCK', 'vibration proof nuts'],
+    industries: ['automotive assembly', 'heavy machinery', 'construction equipment', 'agriculture equipment'],
+    specs:      'Grade 982, M5 to M30, nylon insert for vibration resistance, IS 1367 compliant',
+    promotional: true,
+  },
+  {
+    name:       'Internal Circlips DIN 472',
+    category:   'Fasteners',
+    url_path:   '/promotional-products',
+    keywords:   ['internal circlips', 'DIN 472 circlips', 'bore circlips', 'retaining rings internal'],
+    industries: ['bearing assemblies', 'gearbox manufacture', 'hydraulic cylinders', 'electric motors'],
+    specs:      'DIN 472 standard, spring steel, phosphate and stainless finish, B8 to B100 range',
+    promotional: true,
+  },
+  {
+    name:       'External Circlips DIN 471',
+    category:   'Fasteners',
+    url_path:   '/promotional-products',
+    keywords:   ['external circlips', 'DIN 471 circlips', 'shaft circlips', 'retaining rings external'],
+    industries: ['shaft assembly', 'pump manufacture', 'motor production', 'power transmission'],
+    specs:      'DIN 471 standard, spring steel, reliable shaft retention, A6 to A100 range',
+    promotional: true,
+  },
+  {
+    name:       'Nordlock Washers',
+    category:   'Fasteners',
+    url_path:   '/promotional-products',
+    keywords:   ['Nordlock washers', 'wedge locking washers', 'bolt locking washers', 'anti-loosening washers'],
+    industries: ['rail equipment', 'heavy engineering', 'wind energy structures', 'bridge construction'],
+    specs:      'Wedge-locking technology, M6 to M24, standard grade, eliminates bolt loosening',
+    promotional: true,
+  },
+  {
+    name:       'Hex Bolts',
+    category:   'Fasteners',
+    url_path:   '/products/hex-bolts',
+    keywords:   ['hex bolts', 'hexagonal bolts', 'structural bolts', 'Grade 8.8 bolts'],
+    industries: ['structural steel connections', 'machinery assembly', 'civil construction', 'general engineering'],
+    specs:      'Grade 4.6, 8.8, 10.9 — M6 to M48, IS 1367 compliant, full and partial thread',
+  },
+  {
+    name:       'Allen Bolts',
+    category:   'Fasteners',
+    url_path:   '/products/allen-bolts',
+    keywords:   ['allen bolts', 'socket head cap screws', 'hex socket bolts', 'allen key bolts'],
+    industries: ['precision machinery', 'CNC equipment', 'automotive jigs', 'electronics enclosures'],
+    specs:      'Grade 10.9, M4 to M24, DIN 912, bright zinc and black oxide finish',
+  },
+  {
+    name:       'Dowel Pins',
+    category:   'Fasteners',
+    url_path:   '/products/dowel-pins',
+    keywords:   ['dowel pins', 'precision dowel pins', 'alignment pins', 'locating pins'],
+    industries: ['precision tooling', 'die & mould industry', 'jig and fixture making', 'injection moulding'],
+    specs:      'DIN 6325, hardened steel, ground finish, m6 tolerance, 3mm to 25mm diameter',
+  },
+]
+
+const SYSTEM = `You are an expert SEO content writer and B2B industrial copywriter for Stellar Global Supplies, Pune, India.
+
+Company: Stellar Global Supplies
+Website: https://stellarglobalsupplies.com
+Products: Mild Steel (MS), Stainless Steel (SS), Industrial Fasteners
+Phone: +91 9637655556
+Address: Survey No-169, Talawade, Pune – 411062
+Email: stellarglobalsupplies@gmail.com
+
+Writing style: informative, professional, practical. Speak to procurement managers, plant engineers, and B2B buyers.
+Tone: expert and confident — like an industry professional advising a peer.
+Never: be salesy or use generic filler like "In today's fast-paced world" or "In conclusion, it's clear that".
+Always: cite specific standards (IS codes, DIN, ASTM), grades, and real industry applications.`
 
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Step 1: Generate Blog Outline
+// Selects product (from input or auto-rotation) then generates SEO outline
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function blogGenerateOutline(ctx) {
   const { payload, env } = ctx
-  const topic       = payload.topic || 'Best practices in B2B procurement and supply chain management'
-  const keywords    = payload.keywords || []
-  const customPrompt = payload.custom_prompt || ''
+  const sb             = getClient(env)
+  const inputProduct   = (payload.product_name || '').trim()
 
-  const prompt = `You are a blog content strategist for Stellar Global Supplies.
+  let product
 
-Topic: ${topic}
-Target keywords: ${keywords.length ? keywords.join(', ') : 'supply chain, B2B procurement, industrial supplies'}
-${customPrompt ? `Additional instructions: ${customPrompt}` : ''}
+  if (inputProduct) {
+    // Find best matching product from catalogue
+    const needle = inputProduct.toLowerCase()
+    product = STELLAR_PRODUCTS.find(p =>
+      p.name.toLowerCase().includes(needle) ||
+      p.keywords.some(k => k.toLowerCase().includes(needle)) ||
+      needle.includes(p.name.toLowerCase().split(' ').slice(-1)[0])
+    ) || {
+      name:       inputProduct,
+      category:   'Industrial Products',
+      url_path:   '/',
+      keywords:   [inputProduct, 'industrial supply', 'Pune', 'India'],
+      industries: ['manufacturing', 'construction', 'engineering'],
+      specs:      'Available from Stellar Global Supplies, Pune',
+    }
+  } else {
+    // Auto-rotate — pick next product not yet blogged about
+    const existingBlogs = await sb.select('blog_posts', 'select=title&status=neq.deleted&limit=100')
+    const writtenTitles = (existingBlogs || []).map(b => (b.title || '').toLowerCase())
 
-Return a JSON object with these exact keys:
+    product = STELLAR_PRODUCTS.find(p =>
+      !writtenTitles.some(t =>
+        t.includes(p.name.toLowerCase()) ||
+        p.keywords.some(k => t.includes(k.toLowerCase()))
+      )
+    )
+
+    if (!product) {
+      // All products written — restart rotation from first
+      console.log('[blog_generate_outline] all products covered — restarting rotation')
+      product = STELLAR_PRODUCTS[0]
+    }
+  }
+
+  console.log(`[blog_generate_outline] product="${product.name}" category="${product.category}"`)
+
+  // Check dedup — don't write the same product twice unless explicitly requested
+  if (!inputProduct) {
+    const existing = await sb.select('blog_posts',
+      `title=ilike.${encodeURIComponent(`%${product.name}%`)}&status=neq.deleted&limit=1`
+    )
+    if (existing.length) {
+      // Pick the next unwritten one
+      const writtenNames = new Set(
+        (await sb.select('blog_posts', 'select=title&status=neq.deleted&limit=100'))
+          .map(b => (b.title || '').toLowerCase())
+      )
+      const next = STELLAR_PRODUCTS.find(p =>
+        !writtenNames.has(p.name.toLowerCase()) &&
+        !writtenNames.some(t => t.includes(p.name.toLowerCase()))
+      )
+      if (next) product = next
+    }
+  }
+
+  const productUrl = `https://stellarglobalsupplies.com${product.url_path}`
+  const primaryKw  = product.keywords[0]
+
+  const prompt = `Plan a comprehensive SEO blog post for Stellar Global Supplies about "${product.name}".
+
+Product details:
+- Name: ${product.name}
+- Category: ${product.category}
+- Specifications: ${product.specs}
+- Target industries: ${product.industries.join(', ')}
+- Primary keyword: ${primaryKw}
+- All keywords: ${product.keywords.join(', ')}
+- Product page URL: ${productUrl}
+
+REQUIRED BLOG STRUCTURE (use exactly these 5 sections):
+1. Introduction — What is ${product.name} and why does it matter in Indian industry?
+2. Why ${product.name} — The problems it solves, what happens when you use poor quality, key buying criteria
+3. Use Cases of ${product.name} — Real industry applications with specific examples
+4. Why Source ${product.name} from Stellar Global Supplies — Our specs, certifications, pricing, delivery
+5. Get Your ${product.name} Quote Today — CTA with phone, email, website
+
+SEO rules for title:
+- Must contain "${primaryKw}" in the first 60 characters
+- Should include "Pune" or "India" or "Supplier" or "B2B"
+- Example format: "${product.name} Supplier in Pune | B2B Industrial Supply"
+- Or: "Buy ${product.name} in India — Specs, Grades & Pricing Guide"
+
+Return JSON:
 {
-  "title": "SEO-optimized blog post title",
-  "excerpt": "2-3 sentence summary for meta description (under 160 chars)",
-  "outline": ["Section 1 heading", "Section 2 heading", "Section 3 heading", "Section 4 heading", "Section 5 heading"],
-  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"]
+  "title": "SEO title with product name in first 60 chars",
+  "excerpt": "Meta description under 155 chars — must include '${primaryKw}' and 'Stellar Global Supplies'",
+  "section_headings": [
+    "H2 for section 1",
+    "H2 for section 2",
+    "H2 for section 3",
+    "H2 for section 4",
+    "H2 for section 5"
+  ],
+  "tags": ["${primaryKw.toLowerCase()}", "${product.category.toLowerCase()}", "industrial supply", "pune", "b2b"],
+  "primary_keyword": "${primaryKw}",
+  "product_page_url": "${productUrl}"
 }`
 
-  const outline = await bedrockGenerateJson(env, prompt, SYSTEM, 1500)
-  console.log(`[blog_generate_outline] title=${outline.title}`)
+  const outline = await bedrockGenerateJson(env, prompt, SYSTEM, 1000)
+  console.log(`[blog_generate_outline] title="${outline.title}"`)
 
   await nextJob(ctx, 'blog_generate_content', {
-    blogOutline: outline,
-    topic,
-    keywords,
-    customPrompt,
+    product,
+    outline,
+    productUrl,
+    primaryKw,
   })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Step 2: Generate Full Blog Content
+// Writes the complete blog with the fixed 5-section structure
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function blogGenerateContent(ctx) {
   const { payload, env } = ctx
-  const outline    = payload.blogOutline || {}
-  const topic      = payload.topic || ''
-  const keywords   = payload.keywords || []
-  const wordCount  = payload.word_count || 800
+  const product    = payload.product    || {}
+  const outline    = payload.outline    || {}
+  const productUrl = payload.productUrl || 'https://stellarglobalsupplies.com'
+  const primaryKw  = payload.primaryKw  || product.name
 
-  const prompt = `Write a comprehensive blog post for Stellar Global Supplies website.
+  const sections   = outline.section_headings || []
+  const wordCount  = payload.word_count || 900
 
-Topic: ${topic}
-Title: ${outline.title || ''}
-Excerpt: ${outline.excerpt || ''}
-Outline sections:
-${(outline.outline || []).map((s, i) => `${i + 1}. ${s}`).join('\n')}
-Target keywords: ${keywords.length ? keywords.join(', ') : 'supply chain, B2B procurement, industrial supplies'}
+  const prompt = `Write a complete, SEO-optimised blog post for Stellar Global Supplies.
+
+Title: ${outline.title}
+Meta description: ${outline.excerpt}
+Primary keyword: ${primaryKw}
+All target keywords: ${(product.keywords || []).join(', ')}
 Target word count: ${wordCount} words
 
-Return valid JSON with these exact keys:
+Product information:
+- Name: ${product.name}
+- Category: ${product.category}
+- Specifications: ${product.specs}
+- Industries served: ${(product.industries || []).join(', ')}
+- Product URL: ${productUrl}
+- Promotional products page: https://stellarglobalsupplies.com/promotional-products
+
+SECTION HEADINGS TO USE (exactly in this order):
+${sections.map((h, i) => `${i + 1}. ## ${h}`).join('\n')}
+
+CONTENT RULES:
+1. Use the heading structure above — 5 ## headings, each with 2-4 paragraphs
+2. Mention "${primaryKw}" naturally in every section — especially in the first sentence of sections 1 and 4
+3. Section 3 (Use Cases): name at least 4 specific industries with a concrete use case each
+4. Section 4 (Why Stellar): include these facts:
+   - ISI/BIS certified products
+   - 500+ industrial products under one roof
+   - Competitive bulk pricing
+   - Pan-India delivery
+   - 2-hour quote turnaround
+   - Phone: +91 9637655556
+   - Address: Survey No-169, Talawade, Pune – 411062
+   - Internal link to ${productUrl} using anchor text "${primaryKw}"
+   ${product.promotional ? `- Internal link to https://stellarglobalsupplies.com/promotional-products for promotional pricing` : ''}
+5. Section 5 (CTA): end with clear action steps — call +91 9637655556, email stellarglobalsupplies@gmail.com, visit stellarglobalsupplies.com
+6. Include at least ONE internal link to ${productUrl} in markdown format
+7. Keep sentences under 25 words for readability
+8. No bullet points except in section 4 where listing features
+9. Avoid: "In conclusion", "In today's world", "It's important to note", "It goes without saying"
+
+Return JSON:
 {
-  "content": "full markdown blog post content with ## headings, practical examples, conclusion",
-  "content_preview": "first 500 chars of content for storage"
+  "content": "complete markdown blog post — all 5 sections with ## headings, ~${wordCount} words",
+  "word_count_estimate": 900
 }`
 
-  const blogData = await bedrockGenerateJson(env, prompt, SYSTEM, 3000)
-  const content  = blogData.content || ''
-  const preview  = content.slice(0, 500)
+  const result  = await bedrockGenerateJson(env, prompt, SYSTEM, 4000)
+  const content = result.content || ''
 
-  console.log(`[blog_generate_content] generated ${content.length} chars`)
+  console.log(`[blog_generate_content] generated ~${result.word_count_estimate || '?'} words`)
 
-  // Build image prompt for featured image
+  // Build image prompt
   const imgPrompt = await buildBlogImagePrompt(env, {
-    title:   outline.title || topic,
-    topic,
-    excerpt: outline.excerpt || '',
-    tags:    outline.tags || [],
+    title:    outline.title || product.name,
+    product:  product.name,
+    category: product.category,
+    excerpt:  outline.excerpt || '',
   })
 
-  const blog = {
-    title:        outline.title || topic,
-    excerpt:      outline.excerpt || '',
-    content:      content,
-    contentPreview: preview,
-    tags:         outline.tags || [],
-    imagePrompt:  imgPrompt,
-    topic,
-    keywords,
-  }
-
   await nextJob(ctx, 'blog_image_submit', {
-    blog,
-    blogId:       null,  // will be set after save
+    ...payload,
+    blog: {
+      title:   outline.title,
+      excerpt: outline.excerpt,
+      content,
+      tags:    outline.tags || [],
+      product_name: product.name,
+    },
     imgPrompt,
     imageRetries: 0,
   })
@@ -145,361 +448,230 @@ export async function blogImageSubmit(ctx) {
   const blog      = payload.blog || {}
 
   if (!imgPrompt) {
-    console.log('[blog_image_submit] no image prompt — proceeding without image')
     await saveBlogAndGoToApproval(ctx, blog, null)
     return
   }
 
-  try {
-    const res = await fetch(`${FLUX_BASE}/gradio_api/call/infer`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        data: [imgPrompt, 0, true, 1024, 1024, 4],
-      }),
-    })
+  console.log(`[blog_image_submit] generating featured image via Workers AI FLUX`)
 
-    if (!res.ok) throw new Error(`FLUX submit failed ${res.status}: ${await res.text()}`)
+  // Workers AI FLUX — synchronous, OG image ratio 1200x630 for blog featured image
+  const storageKey = `blog-images/${crypto.randomUUID()}`
+  const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
+    width:  1024,   // Workers AI supports up to 1024 on schnell
+    height: 576,    // ~16:9 ratio for blog OG image
+  })
 
-    const result  = await res.json()
-    const eventId = result.event_id
-    if (!eventId) throw new Error(`FLUX: no event_id in response: ${JSON.stringify(result)}`)
-
-    console.log(`[blog_image_submit] queued eventId=${eventId}`)
-    await nextJob(ctx, 'blog_image_poll', {
-      ...payload,
-      imageEventId: eventId,
-      imageRetries: 0,
-    })
-  } catch (e) {
-    console.warn(`[blog_image_submit] FLUX submit failed (${e.message}) — proceeding without image`)
-    await saveBlogAndGoToApproval(ctx, blog, null)
-  }
+  await saveBlogAndGoToApproval(ctx, blog, image)
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Step 4: Poll FLUX Result
-// ═══════════════════════════════════════════════════════════════════════════
-
-export async function blogImagePoll(ctx) {
-  const { payload, env } = ctx
-  const eventId   = payload.imageEventId
-  const retries   = payload.imageRetries || 0
-  const blog      = payload.blog || {}
-
-  if (!eventId) {
-    await saveBlogAndGoToApproval(ctx, blog, null)
-    return
-  }
-
-  if (retries >= MAX_RETRIES) {
-    console.warn(`[blog_image_poll] max retries reached — proceeding without image`)
-    await saveBlogAndGoToApproval(ctx, blog, null)
-    return
-  }
-
-  try {
-    const streamUrl = `${FLUX_BASE}/gradio_api/call/infer/${eventId}`
-    const res = await fetch(streamUrl, {
-      headers: { Accept: 'text/event-stream' },
-      signal:  AbortSignal.timeout(20_000),
-    })
-
-    if (!res.ok) throw new Error(`FLUX poll failed ${res.status}`)
-
-    const text   = await res.text()
-    const lines  = text.split('\n')
-
-    let imageUrl = null
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim()
-      if (line.startsWith('event: complete')) {
-        const dataLine = lines.slice(i + 1).find(l => l.startsWith('data:'))
-        if (dataLine) {
-          try {
-            const parsed = JSON.parse(dataLine.replace(/^data:\s*/, ''))
-            const imgInfo = Array.isArray(parsed) ? parsed[0] : parsed
-            imageUrl = imgInfo?.url || imgInfo?.path || (typeof imgInfo === 'string' ? imgInfo : null)
-          } catch { /* ignore parse error */ }
-        }
-        break
-      }
-      if (line.startsWith('event: error')) {
-        throw new Error(`FLUX stream error: ${lines[i + 1] || ''}`)
-      }
-    }
-
-    if (!imageUrl) {
-      console.log(`[blog_image_poll] still processing retry=${retries + 1}`)
-      await nextJob(ctx, 'blog_image_poll', {
-        ...payload,
-        imageRetries: retries + 1,
-      })
-      return
-    }
-
-    // Image ready — download and upload to R2
-    console.log(`[blog_image_poll] image ready url=${imageUrl.slice(0, 60)}`)
-    const imgRes = await fetch(imageUrl)
-    if (!imgRes.ok) throw new Error(`Failed to download image ${imgRes.status}`)
-    const imgBytes = await imgRes.arrayBuffer()
-
-    const { ext, contentType } = imageExtAndType(imgBytes)
-    const key      = `blog-images/${crypto.randomUUID()}${ext}`
-    const publicUrl = await uploadImage(env, imgBytes, key, contentType)
-
-    console.log(`[blog_image_poll] image uploaded key=${key}`)
-    await saveBlogAndGoToApproval(ctx, blog, { url: publicUrl, key })
-
-  } catch (e) {
-    if (retries < MAX_RETRIES) {
-      console.warn(`[blog_image_poll] poll error (${e.message}) retry=${retries + 1}`)
-      await nextJob(ctx, 'blog_image_poll', {
-        ...payload,
-        imageRetries: retries + 1,
-      })
-    } else {
-      console.warn(`[blog_image_poll] giving up after ${MAX_RETRIES} retries — proceeding without image`)
-      await saveBlogAndGoToApproval(ctx, blog, null)
-    }
-  }
-}
+// blogImagePoll removed — Workers AI FLUX is synchronous
+// blog_image_submit now generates + uploads in one step
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helper: Save blog to Supabase and go to approval gate
+// Helper: Save blog to Supabase + create approval gate
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function saveBlogAndGoToApproval(ctx, blog, image) {
   const { env } = ctx
-  const sb = getClient(env)
-
+  const sb   = getClient(env)
   const slug = slugify(blog.title || 'blog-post') + '-' + crypto.randomUUID().slice(0, 6)
 
   const row = {
-    title:         blog.title || '',
+    title:           blog.title   || '',
     slug,
-    excerpt:       blog.excerpt || '',
-    content:       blog.contentPreview || blog.content?.slice(0, 500) || '',
-    image_url:     image?.url || null,
-    image_s3_key:  image?.key || null,
-    tags:          blog.tags || [],
-    status:        'draft',
+    excerpt:         blog.excerpt || '',
+    content:         (blog.content || '').slice(0, 500),   // preview
+    image_url:       image?.url  || null,
+    image_s3_key:    image?.key  || null,
+    tags:            blog.tags   || [],
+    status:          'draft',
     workflow_run_id: ctx.workflow_run_id || null,
   }
 
-  const saved = await sb.insert('blog_posts', row)
+  // Try insert with all cols, fall back if columns missing
+  let saved
+  try {
+    saved = await sb.insert('blog_posts', row)
+  } catch {
+    const minimal = { title: row.title, slug, excerpt: row.excerpt,
+                      content: row.content, tags: row.tags, status: row.status }
+    saved = await sb.insert('blog_posts', minimal)
+  }
   console.log(`[blog] saved blogId=${saved.id}`)
+
+  const contentPreview = (blog.content || '').slice(0, 800)
+  const imageHtml      = image?.url
+    ? `<img src="${image.url}" style="max-width:100%;border-radius:8px;margin:12px 0 20px"/>`
+    : '<p style="color:#94a3b8;font-size:12px;font-style:italic">Featured image generating or unavailable</p>'
 
   const previewHtml = `
     <div style="font-family:Arial,sans-serif;max-width:600px">
-      <h2 style="color:#0A2547">Blog Post — ${blog.title || ''}</h2>
-      <p style="color:#64748B">${blog.excerpt || ''}</p>
-      ${image?.url ? `<img src="${image.url}" style="max-width:100%;border-radius:8px;margin:12px 0"/>` : ''}
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;font-size:13px;white-space:pre-wrap">
-        ${(blog.content || '').slice(0, 800)}...
+      <h2 style="color:#0A2547;margin:0 0 6px">${blog.title || ''}</h2>
+      <p style="color:#64748b;font-size:13px;font-style:italic;margin:0 0 16px">${blog.excerpt || ''}</p>
+      ${imageHtml}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+        ${(blog.tags || []).map(t => `<span style="background:#f1f5f9;border-radius:4px;padding:3px 8px;font-size:11px">${t}</span>`).join('')}
       </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;
+                  font-size:13px;line-height:1.7;color:#334155;white-space:pre-wrap;max-height:300px;overflow:hidden">
+        ${contentPreview}${contentPreview.length >= 800 ? '\n\n...' : ''}
+      </div>
+      <p style="color:#64748b;font-size:12px;margin-top:16px">
+        Approve to create a GitHub PR. Reject to discard. You can also edit the content before approving.
+      </p>
     </div>`
+
+  // Store full content in payload for GitHub PR step
+  ctx.payload.blogId = saved.id
+  ctx.payload.blog   = {
+    ...blog,
+    id:            saved.id,
+    slug,
+    image_url:     image?.url || null,
+    image_s3_key:  image?.key || null,
+    full_content:  blog.content,
+  }
 
   await insertApprovalGate(ctx, 'blog_create_github_pr', {
     referenceId: saved.id,
+    title:       blog.title,
+    blog:        ctx.payload.blog,
     previewHtml,
   })
-
-  // Update payload with blogId for the next step
-  ctx.payload.blogId = saved.id
-  ctx.payload.blog = { ...blog, id: saved.id, image_url: image?.url, image_s3_key: image?.key }
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Step 5: Create GitHub PR
-// Ports: create_github_pr.py
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function blogCreateGithubPr(ctx) {
   const { payload, env } = ctx
-  const blogId = payload.blogId || payload.blog?.id
+  const blog   = payload.blog   || {}
+  const blogId = payload.blogId || blog.id
   if (!blogId) throw new Error('Missing blogId in payload')
 
-  // Reload full blog content from Supabase
   const sb = getClient(env)
   const rows = await sb.select('blog_posts', `id=eq.${blogId}&limit=1`)
   if (!rows.length) throw new Error(`Blog post not found: ${blogId}`)
-  const blog = rows[0]
+  const saved = rows[0]
+
+  // Use full_content from payload — DB only stores preview
+  const fullContent = blog.full_content || saved.content || ''
 
   const token      = await resolveSecret(env.GITHUB_TOKEN)
-  const repoOwner  = await resolveSecret(env.WEBSITE_REPO_OWNER) || ''
-  const repoName   = await resolveSecret(env.WEBSITE_REPO_NAME) || ''
+  const repoOwner  = await resolveSecret(env.WEBSITE_REPO_OWNER)
+  const repoName   = await resolveSecret(env.WEBSITE_REPO_NAME)
   const baseBranch = await resolveSecret(env.WEBSITE_BASE_BRANCH) || 'main'
-  const blogDir    = await resolveSecret(env.WEBSITE_BLOG_DIR) || 'content/blog'
+  const blogDir    = await resolveSecret(env.WEBSITE_BLOG_DIR)    || 'content/blog'
 
-  if (!repoOwner || !repoName) {
-    throw new Error(`Missing GitHub config: WEBSITE_REPO_OWNER='${repoOwner}', WEBSITE_REPO_NAME='${repoName}'`)
-  }
+  if (!token)     throw new Error('Missing: GITHUB_TOKEN')
+  if (!repoOwner) throw new Error('Missing: WEBSITE_REPO_OWNER')
+  if (!repoName)  throw new Error('Missing: WEBSITE_REPO_NAME')
 
-  const ghApi = 'https://api.github.com'
-  const ghHeaders = {
-    'Authorization':        `Bearer ${token}`,
-    'Accept':               'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'Content-Type':         'application/json',
-    'User-Agent':           'StellarWorkflows/1.0',
-  }
-
-  async function gh(method, path, body) {
-    const res = await fetch(`${ghApi}${path}`, {
+  const gh = async (method, path, body) => {
+    const res = await fetch(`https://api.github.com${path}`, {
       method,
-      headers: ghHeaders,
-      body:    body ? JSON.stringify(body) : undefined,
+      headers: {
+        Authorization:          `Bearer ${token}`,
+        Accept:                 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type':         'application/json',
+        'User-Agent':           'StellarWorkflows/1.0',
+      },
+      body: body ? JSON.stringify(body) : undefined,
     })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`GitHub ${method} ${path}: ${res.status} ${text}`)
-    }
-    return res.json()
+    if (!res.ok) throw new Error(`GitHub ${method} ${path}: ${res.status} ${await res.text()}`)
+    const text = await res.text()
+    return text ? JSON.parse(text) : {}
   }
 
-  try {
-    // 1. Get base branch SHA
-    const refData = await gh('GET', `/repos/${repoOwner}/${repoName}/git/refs/heads/${baseBranch}`)
-    const baseSha = refData.object.sha
+  const refData   = await gh('GET', `/repos/${repoOwner}/${repoName}/git/refs/heads/${baseBranch}`)
+  const baseSha   = refData.object.sha
+  const today     = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const newBranch = `blog/${(saved.slug || blogId).slice(0, 40)}-${today}`
 
-    // 2. Create new branch
-    const today     = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    const newBranch = `blog/${blog.slug?.slice(0, 40) || blogId}-${today}`
-    await gh('POST', `/repos/${repoOwner}/${repoName}/git/refs`, {
-      ref: `refs/heads/${newBranch}`,
-      sha: baseSha,
-    })
+  await gh('POST', `/repos/${repoOwner}/${repoName}/git/refs`, {
+    ref: `refs/heads/${newBranch}`,
+    sha: baseSha,
+  })
 
-    // 3. Build MDX file content
-    const pubDate  = new Date().toISOString().slice(0, 10)
-    const tagsYaml = (blog.tags || ['general']).map(t => `  - ${t}`).join('\n')
-    const fileContent = `---
-title: "${blog.title || ''}"
+  const pubDate  = new Date().toISOString().slice(0, 10)
+  const tagsYaml = (saved.tags || []).map(t => `  - "${t}"`).join('\n')
+
+  const fileContent = `---
+title: "${(saved.title || '').replace(/"/g, '\\"')}"
 date: "${pubDate}"
-excerpt: "${blog.excerpt || ''}"
-image: "${blog.image_url || ''}"
+excerpt: "${(saved.excerpt || '').replace(/"/g, '\\"')}"
+image: "${saved.image_url || ''}"
 author: "Stellar Global Supplies"
+product: "${blog.product_name || ''}"
 tags:
 ${tagsYaml}
+seo:
+  title: "${(saved.title || '').replace(/"/g, '\\"')}"
+  description: "${(saved.excerpt || '').replace(/"/g, '\\"').slice(0, 155)}"
 ---
 
-${blog.content || ''}
+${fullContent}
 `
 
-    // 4. Create file in new branch
-    const filePath = `${blogDir}/${blog.slug || blogId}.md`
-    const encoded  = btoa(unescape(encodeURIComponent(fileContent)))
-    await gh('PUT', `/repos/${repoOwner}/${repoName}/contents/${filePath}`, {
-      message: `feat: add blog post '${blog.title}'`,
-      content: encoded,
-      branch:  newBranch,
-    })
+  const filePath = `${blogDir}/${saved.slug || blogId}.md`
+  await gh('PUT', `/repos/${repoOwner}/${repoName}/contents/${filePath}`, {
+    message: `blog: ${saved.title}`,
+    content: btoa(unescape(encodeURIComponent(fileContent))),
+    branch:  newBranch,
+  })
 
-    // 5. Open Pull Request
-    const pr = await gh('POST', `/repos/${repoOwner}/${repoName}/pulls`, {
-      title: `[Blog] ${blog.title}`,
-      body:  `## New Blog Post\n\n**Title:** ${blog.title}\n\n**Excerpt:** ${blog.excerpt || ''}\n\n**Tags:** ${(blog.tags || []).join(', ')}\n\n**Featured Image:** ${blog.image_url || ''}\n\n---\n*Auto-generated by Stellar Workflows Platform*`,
-      head:  newBranch,
-      base:  baseBranch,
-    })
+  const pr = await gh('POST', `/repos/${repoOwner}/${repoName}/pulls`, {
+    title: `[Blog] ${saved.title}`,
+    body:  `## New Blog Post\n\n**Title:** ${saved.title}\n**Product:** ${blog.product_name || ''}\n**Excerpt:** ${saved.excerpt || ''}\n**Tags:** ${(saved.tags || []).join(', ')}\n**Image:** ${saved.image_url || 'None'}\n\n---\n*Auto-generated by Stellar Workflows*`,
+    head:  newBranch,
+    base:  baseBranch,
+  })
 
-    const prUrl    = pr.html_url
-    const prNumber = pr.number
+  console.log(`[blog_create_github_pr] PR #${pr.number}: ${pr.html_url}`)
 
-    // Update blog post status
+  try {
     await sb.update('blog_posts', {
       status:    'pr_created',
-      pr_url:    prUrl,
-      pr_number: prNumber,
+      pr_url:    pr.html_url,
+      pr_number: pr.number,
     }, `id=eq.${blogId}`)
-
-    console.log(`[blog_create_github_pr] PR created: ${prUrl}`)
-    
-  } catch (e) {
-    console.error(`[blog_create_github_pr] GitHub PR creation failed:`, e)
-    
-    // Update blog status to indicate PR creation failed
-    await sb.update('blog_posts', {
-      status: 'draft',
-    }, `id=eq.${blogId}`)
-    
-    // Insert approval gate so user can manually retry
-    await ctx.d1.insert('approval_queue', {
-      id:              crypto.randomUUID(),
-      workflow_type:   'blog',
-      workflow_run_id: ctx.workflow_run_id,
-      reference_id:    blogId,
-      task_token:      `blog-retry-${crypto.randomUUID()}`,
-      payload:         { 
-        blogId, 
-        blog,
-        approvalGate: 'save', 
-        _nextStep: 'blog_create_github_pr',
-        error: e.message 
-      },
-      preview_html:    `<p>GitHub PR creation failed: ${e.message}</p><p>The blog post has been saved as a draft and can be retried.</p>`,
-      status:          'pending',
-      created_at:      new Date().toISOString(),
-    })
-    
-    await ctx.d1.update('job_queue', { status: 'waiting_for_approval' }, { id: ctx.job.id })
-    if (ctx.workflow_run_id) {
-      await ctx.d1.update('workflow_runs', { status: 'awaiting_approval' }, { id: ctx.workflow_run_id })
-    }
+  } catch {
+    await sb.update('blog_posts', { status: 'pr_created' }, `id=eq.${blogId}`)
   }
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helper: Build image prompt for blog featured image
+// Helper: Blog featured image prompt
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function buildBlogImagePrompt(env, { title, topic, excerpt, tags }) {
-  const techKeywords = ['software', 'platform', 'system', 'workflow', 'automation', 'tech', 'digital',
-    'dashboard', 'api', 'app', 'saas', 'cloud', 'data', 'analytics', 'ai', 'erp', 'order management']
-  const topicLower = (topic + ' ' + title).toLowerCase()
-  const isTech = techKeywords.some(kw => topicLower.includes(kw))
-
-  const styleRules = isTech ? `
-- Describe a realistic editorial tech photograph: a laptop or monitor in a modern bright office
-- Screen shows a relevant dashboard UI, workflow diagram, or analytics chart related to the blog topic
-- Natural window light, wooden desk, shallow depth of field, sharp screen
-- Navy and gold colour accents on the UI visible on screen
-- Style: realistic DSLR editorial tech photography
-- Never use: physical products, industrial setting, warehouse, machinery`
-    : `
-- Describe a realistic product or industry photograph relevant to the blog topic
-- Simple clean background: grey studio sweep, wooden workbench, or professional office
-- Natural even lighting, sharp product, slight background blur
-- Muted natural tones, no HDR or oversaturation
-- Style: realistic DSLR editorial photography
-- Never use: cinematic, render, 3D, glowing, AI art style`
-
-  const instruction = `Write a FLUX image generation prompt (60-80 words) for a featured blog post image.
+async function buildBlogImagePrompt(env, { title, product, category, excerpt }) {
+  const instruction = `Write a FLUX image generation prompt (60-80 words) for a B2B blog post featured image.
 
 Blog title: ${title}
-Topic: ${topic}
-Summary: ${(excerpt || '').slice(0, 200)}
-Tags: ${(tags || []).slice(0, 5).join(', ')}
+Product: ${product}
+Category: ${category}
+Excerpt: ${excerpt.slice(0, 150)}
 
-Style rules:${styleRules}
-
-Additional rules:
-- Be specific — describe exact visual elements, not generic descriptions
-- Include: "DSLR photo", "natural lighting", "realistic", "photorealistic"
-- Output ONLY the prompt — no explanation, no preamble, no quotes`
+Rules:
+- Show the physical product in a professional industrial setting (workshop, factory, construction site, warehouse)
+- Natural lighting, DSLR editorial style, shallow depth of field
+- Product should be the clear hero of the image
+- Clean, professional, photorealistic — no text, no logos, no people
+- For stainless steel: bright clean studio or food-grade environment
+- For fasteners: precision close-up in machining or assembly context
+- Include: "DSLR photo", "natural lighting", "photorealistic"
+Output ONLY the prompt text — no preamble, no quotes`
 
   try {
-    const prompt = (await bedrockGenerateText(env, instruction, '', 150)).trim().replace(/^"|"$/g, '')
-    return prompt
-  } catch (e) {
-    if (isTech) {
-      return `Realistic DSLR photo of a laptop in a modern professional office showing a clean dashboard UI related to ${topic}, natural window light, sharp screen, shallow depth of field, realistic tech photography`
-    }
-    return `Realistic DSLR editorial photo representing ${topic} for a B2B industrial supply company, natural lighting, professional setting, photorealistic`
+    return (await bedrockGenerateText(env, instruction, '', 150))
+      .trim().replace(/^"|"$/g, '')
+  } catch {
+    return `Realistic DSLR editorial photograph of ${product} in a professional industrial setting, natural lighting, sharp focus on product, photorealistic, no text`
   }
 }

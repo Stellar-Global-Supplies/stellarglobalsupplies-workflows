@@ -9,18 +9,19 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 
 const WORKFLOW_CARDS = [
-  { to: '/leads',  icon: Users,    label: 'Lead Generation',  sub: 'Hunter.io + AI outreach',   color: 'bg-royal'       },
+  { to: '/leads',  icon: Users,    label: 'Lead Generation',  sub: 'Tavily + Groq + AI outreach', color: 'bg-royal'     },
   { to: '/social', icon: Share2,   label: 'Product Posts',    sub: 'AI image + multi-platform', color: 'bg-navy'        },
   { to: '/tech',   icon: Zap,      label: 'Tech Showcase',    sub: 'S3 context → social post',  color: 'bg-amber'       },
   { to: '/blog',   icon: FileText, label: 'Blog Post → PR',   sub: 'AI blog + GitHub PR',       color: 'bg-emerald-600' },
 ]
 
 const WF_LABELS = {
-  lead_generation:   'Lead Generation',
+  lead_generation:     'Lead Generation',
   lead_email_existing: 'Lead Re-email',
-  social_product:    'Product Post',
-  social_tech:       'Tech Post',
-  blog:              'Blog Post',
+  social_product:      'Product Post',
+  social_tech:         'Tech Post',
+  blog:                'Blog Post',
+  payment_followup:    'Payment Follow-up',
 }
 
 const WF_COLORS = {
@@ -29,6 +30,7 @@ const WF_COLORS = {
   social_product:      'bg-navy',
   social_tech:         'bg-amber',
   blog:                'bg-emerald-600',
+  payment_followup:    'bg-red-600',
 }
 
 function CostBar({ label, cost, totalCost, color }) {
@@ -241,8 +243,10 @@ export default function Dashboard() {
                 return (
                   <div key={run.id} className="flex items-center gap-4 px-5 py-4">
                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      run.status === 'succeeded' ? 'bg-emerald-400'
-                      : run.status === 'running'  ? 'bg-blue-400 animate-pulse'
+                      run.status === 'succeeded'          ? 'bg-emerald-400'
+                      : run.status === 'running'            ? 'bg-blue-400 animate-pulse'
+                      : run.status === 'awaiting_approval'  ? 'bg-amber-400'
+                      : run.status === 'stopped'            ? 'bg-slate-400'
                       : 'bg-red-400'
                     }`} />
                     <div className="flex-1 min-w-0">

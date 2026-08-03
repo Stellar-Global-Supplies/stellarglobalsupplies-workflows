@@ -11,13 +11,15 @@ import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
 const WF_META = {
-  lead_approval:    { label: 'Lead Approval',      icon: Users,    color: 'text-emerald-600', bg: 'bg-emerald-50' },
-  lead_email:       { label: 'Email Outreach',     icon: Mail,     color: 'text-blue-600',    bg: 'bg-blue-50' },
-  lead_followup:    { label: 'Follow-up Email',    icon: Mail,     color: 'text-indigo-600',  bg: 'bg-indigo-50' },
-  social_product:   { label: 'Product Post',       icon: Share2,   color: 'text-navy',        bg: 'bg-navy/5' },
-  social_tech:      { label: 'Tech Post',          icon: Code2,    color: 'text-amber-600',   bg: 'bg-amber-50' },
-  blog:             { label: 'Blog Post',          icon: FileText, color: 'text-purple-600',  bg: 'bg-purple-50' },
-  payment_followup: { label: 'Payment Follow-up',  icon: CreditCard, color: 'text-red-600',  bg: 'bg-red-50' },
+  lead_approval:       { label: 'Lead Approval',     icon: Users,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  lead_generation:     { label: 'Lead Generation',   icon: Users,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  lead_email:          { label: 'Email Outreach',    icon: Mail,       color: 'text-blue-600',    bg: 'bg-blue-50' },
+  lead_email_existing: { label: 'Email Outreach',    icon: Mail,       color: 'text-blue-600',    bg: 'bg-blue-50' },
+  lead_followup:       { label: 'Follow-up Email',   icon: Mail,       color: 'text-indigo-600',  bg: 'bg-indigo-50' },
+  social_product:      { label: 'Product Post',      icon: Share2,     color: 'text-navy',        bg: 'bg-navy/5' },
+  social_tech:         { label: 'Tech Post',         icon: Code2,      color: 'text-amber-600',   bg: 'bg-amber-50' },
+  blog:                { label: 'Blog Post',         icon: FileText,   color: 'text-purple-600',  bg: 'bg-purple-50' },
+  payment_followup:    { label: 'Payment Follow-up', icon: CreditCard, color: 'text-red-600',     bg: 'bg-red-50' },
 }
 
 // ─── Platform previews ────────────────────────────────────────────────────────
@@ -339,12 +341,16 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
   const payload = item.payload || {}
   const gate    = payload.approvalGate || 'save'
   const isPublishGate = gate === 'publish'
-  const isSocialPost  = ['social_product','social_tech'].includes(item.workflow_type)
-  const isBlog        = item.workflow_type === 'blog'
+  const isSocialPost   = ['social_product','social_tech'].includes(item.workflow_type)
+  const isBlog         = item.workflow_type === 'blog'
+  const isLeadApproval = ['lead_approval','lead_generation'].includes(item.workflow_type)
+  const isLeadEmail    = ['lead_email','lead_email_existing','lead_followup'].includes(item.workflow_type)
+  const isPayment      = item.workflow_type === 'payment_followup'
 
   const post  = payload.post
   const blog  = payload.blog
-  const email = payload.email || (payload.subject ? payload : null)
+  const lead  = payload.lead || null
+  const email = payload.email || payload.emailDraft || (payload.subject ? payload : null)
   const contentKey = payload.post?.content_s3_key || payload.blog?.content_s3_key
 
   useEffect(() => {
@@ -367,10 +373,14 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
   }
 
   const hasEdits = Object.keys(edits).some(k => Object.keys(edits[k] || {}).length > 0)
-  const canRegenerate = isSocialPost || isBlog
+  const canRegenerate = isSocialPost || isBlog  // Lead + payment don't have regenerate
 
   return (
-    <Modal open title={`${isPublishGate ? '📤 Publish' : '💾 Save'}: ${meta.label}`} onClose={onClose} width="max-w-5xl">
+    <Modal open title={
+        isLeadApproval ? `👤 Lead Review: ${lead?.company_name || 'New Lead'}`
+        : isPublishGate ? `📤 Publish: ${meta.label}`
+        : `💾 Review: ${meta.label}`
+      } onClose={onClose} width="max-w-5xl">
       <div className="space-y-4">
 
         {/* Gate info bar */}
@@ -412,16 +422,55 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
             : <BlogEditor blog={blog} edits={edits} setEdits={setEdits} fullContent={fullContent} />
         )}
 
-        {/* EMAIL CONTENT (no preview mode — just editor) */}
-        {email && !post && !blog && (
+        {/* LEAD APPROVAL — show lead card + email draft */}
+        {isLeadApproval && (
+          <div className="space-y-4">
+            {lead && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-3">Lead Details</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    ['Company',  lead.company_name],
+                    ['Industry', lead.industry],
+                    ['Website',  lead.website],
+                    ['Contact',  lead.contact_name],
+                    ['Email',    lead.email],
+                    ['Phone',    lead.phone],
+                    ['Source',   lead.source],
+                    ['Country',  lead.country],
+                  ].filter(([,v]) => v).map(([k,v]) => (
+                    <div key={k}>
+                      <p className="text-xs text-slate-400">{k}</p>
+                      <p className="text-sm font-medium text-slate-700 break-all">{v}</p>
+                    </div>
+                  ))}
+                </div>
+                {lead.description && (
+                  <p className="mt-3 text-xs text-slate-500 italic border-t border-emerald-100 pt-2">{lead.description}</p>
+                )}
+              </div>
+            )}
+            {email
+              ? <EmailEditor email={email} edits={edits} setEdits={setEdits} />
+              : item.preview_html
+                ? <div className="p-4 text-sm border border-slate-200 rounded-xl" dangerouslySetInnerHTML={{ __html: item.preview_html }} />
+                : null
+            }
+          </div>
+        )}
+
+        {/* PAYMENT / LEAD EMAIL — show email editor */}
+        {(isPayment || isLeadEmail) && email && !isLeadApproval && (
           <EmailEditor email={email} edits={edits} setEdits={setEdits} />
         )}
 
-        {/* Fallback */}
-        {!post && !blog && !email && (
-          item.preview_html
-            ? <div className="p-4 text-sm border border-slate-200 rounded-xl" dangerouslySetInnerHTML={{ __html: item.preview_html }} />
-            : <pre className="p-4 text-xs text-slate-600 overflow-auto max-h-64 whitespace-pre-wrap border border-slate-200 rounded-xl">{JSON.stringify(payload, null, 2)}</pre>
+        {/* FALLBACK */}
+        {!isSocialPost && !isBlog && !isLeadApproval && !isPayment && !isLeadEmail && (
+          email
+            ? <EmailEditor email={email} edits={edits} setEdits={setEdits} />
+            : item.preview_html
+              ? <div className="p-4 text-sm border border-slate-200 rounded-xl" dangerouslySetInnerHTML={{ __html: item.preview_html }} />
+              : <pre className="p-4 text-xs text-slate-600 overflow-auto max-h-64 whitespace-pre-wrap border border-slate-200 rounded-xl">{JSON.stringify(payload, null, 2)}</pre>
         )}
 
         {/* Regenerate panel */}

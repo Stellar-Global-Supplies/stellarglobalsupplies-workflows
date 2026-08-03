@@ -83,13 +83,15 @@ export default function TechPost() {
   }
 
   function handleComplete(status) {
-    // Don't hide the progress panel — let user close it manually via X button
     if (status === 'awaiting_approval') {
       toast.success('Tech post drafted — check Approval Queue to review and publish')
       qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
     } else if (status === 'succeeded') {
       toast.success('Tech post published successfully')
       qc.invalidateQueries(['social-posts'])
+      setTab('posts')
+    } else if (status === 'stopped') {
+      toast('Post already exists for this repo — skipped', { icon: '⚠️' })
     } else if (status === 'failed') {
       toast.error('Workflow failed — check progress panel for details')
     }
@@ -108,7 +110,7 @@ export default function TechPost() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <PageHeader icon={Code2} title="Tech Showcase Posts"
-        sub="Reads {repo_name}/ai_context.md from S3 → AI generates post + image → approval → posts to selected platforms" />
+        sub="AI generates post + image for your tech update → approval → posts to selected platforms" />
 
       {/* Live progress panel — shows when a workflow is running */}
       {activeRunId && (
@@ -140,7 +142,7 @@ export default function TechPost() {
           <h2 className="font-semibold text-navy mb-4">New Tech Showcase Post</h2>
           <div className="space-y-4">
             <FormField label="Repository Name"
-              hint="The workflow reads {repo_name}/ai_context.md from the private context bucket">
+              hint="Used to check for duplicate posts — optional if providing a custom prompt">
               <input value={form.repo_name} onChange={e => setForm(f => ({...f, repo_name: e.target.value}))}
                 className="input font-mono" placeholder="e.g. workflows-platform" />
             </FormField>
@@ -160,9 +162,8 @@ export default function TechPost() {
 
           {!activeRunId && (
             <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
-              <strong>Context file format:</strong> Place a markdown file at
-              <code className="bg-slate-200 px-1 rounded mx-1">{'{repo_name}/ai_context.md'}</code>
-              in the private context bucket. The AI will use it to write an accurate tech showcase post and generate the featured image.
+              <strong>Tip:</strong> Add a detailed custom prompt describing your tech update — features shipped, problems solved,
+              business impact. The more context you provide, the more accurate and relevant the post will be.
             </div>
           )}
 

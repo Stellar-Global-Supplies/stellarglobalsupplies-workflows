@@ -12,7 +12,6 @@ import {
   socialGetOrders,
   socialBedrockGeneratePost,
   socialImageSubmit,
-  socialImagePoll,
   socialPostToPlatforms,
 } from './steps/social-post.js'
 import { nowIso }    from './lib/utils.js'
@@ -26,7 +25,6 @@ import {
   blogGenerateOutline,
   blogGenerateContent,
   blogImageSubmit,
-  blogImagePoll,
   blogCreateGithubPr,
 } from './steps/blog-post.js'
 import {
@@ -296,14 +294,14 @@ const STEP_HANDLERS = {
   social_get_orders:            (ctx) => socialGetOrders(ctx),
   social_bedrock_generate_post: (ctx) => socialBedrockGeneratePost(ctx),
   social_image_submit:          (ctx) => socialImageSubmit(ctx),
-  social_image_poll:            (ctx) => socialImagePoll(ctx),
+  // social_image_poll removed — Workers AI FLUX is synchronous
   social_post_to_platforms:     (ctx) => socialPostToPlatforms(ctx),
 
-  // ── Blog ────────────────────────────────────────────────────── LIVE ✓ ──
+  // ── Blog ──────────────────────────────────────────────────── LIVE ✓ ──
   blog_generate_outline:   (ctx) => blogGenerateOutline(ctx),
   blog_generate_content:   (ctx) => blogGenerateContent(ctx),
   blog_image_submit:       (ctx) => blogImageSubmit(ctx),
-  blog_image_poll:         (ctx) => blogImagePoll(ctx),
+  // blog_image_poll removed — Workers AI FLUX is synchronous
   blog_create_github_pr:   (ctx) => blogCreateGithubPr(ctx),
 
   // ── Payment Followup ─────────────────────────────────────────── LIVE ✓ ──

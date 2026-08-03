@@ -41,16 +41,14 @@ export default function LeadGeneration() {
   }
 
   function handleComplete(status) {
+    // Don't hide the progress panel — let user close it manually via X button
     if (status === 'awaiting_approval') {
-      toast.success('Lead found — check Approval Queue to review and send email')
+      toast.success('Lead generated — check Approval Queue to review and send email')
       qc.invalidateQueries({ queryKey: ['pending-approvals-count'] })
     } else if (status === 'succeeded') {
-      // Could be a real success or a duplicate skip — check jobs
       toast.success('Lead generation completed')
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
-    } else if (status === 'stopped') {
-      toast('Duplicate lead found — skipped', { icon: '⚠️' })
     } else if (status === 'failed') {
       toast.error('Workflow failed — check progress panel for details')
     }
@@ -71,7 +69,7 @@ export default function LeadGeneration() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <PageHeader icon={Users} title="Lead Generation" sub="AI discovers companies · Hunter.io finds real emails · Gmail sends outreach" />
+      <PageHeader icon={Users} title="Lead Generation" sub="Tavily finds real companies · Groq extracts contacts · Bedrock drafts email · you approve · Gmail sends" />
 
       {/* Live progress panel — shows when a workflow is running */}
       {activeRunId && (
@@ -85,14 +83,12 @@ export default function LeadGeneration() {
         </div>
       )}
 
-      {/* Hunter.io info bar */}
+      {/* Lead gen info bar */}
       {!activeRunId && (
-        <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-6 text-sm text-blue-800">
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 text-sm text-amber-800">
           <Info size={16} className="flex-shrink-0 mt-0.5" />
           <div>
-            <strong>Tavily + Groq + Bedrock lead pipeline:</strong> Tavily searches the real web for companies in your target industry,
-            Groq extracts structured contact data, and Bedrock drafts a personalised B2B outreach email.
-            You review and approve the lead + email before it sends. Duplicates are automatically skipped.
+            <strong>Real lead pipeline:</strong> Tavily searches the live web for companies in your target industry, Groq extracts contact data, Bedrock drafts a personalised B2B outreach email. You review and approve before it sends. Duplicates are automatically skipped.
           </div>
         </div>
       )}
@@ -136,7 +132,7 @@ export default function LeadGeneration() {
                 : <><Play size={15} /> Generate Lead</>}
             </button>
             <div className="text-xs text-slate-400 text-center">
-              Workflow: Tavily finds real companies → Groq extracts contact → dedup check → save → Bedrock drafts email → await your approval → send
+              Workflow: Tavily finds real company → Groq extracts contact → dedup check → save → Bedrock drafts email → await approval → Gmail sends
             </div>
           </div>
         </div>
@@ -161,8 +157,8 @@ export default function LeadGeneration() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-navy truncate">{lead.company_name}</span>
-                      {lead.source === 'hunter.io' && (
-                        <span className="badge bg-blue-50 text-blue-700 border border-blue-200 text-xs">Hunter.io</span>
+                      {lead.source && lead.source !== 'needs_review' && (
+                        <span className="badge bg-blue-50 text-blue-700 border border-blue-200 text-xs capitalize">{lead.source.replace(/_/g,' ')}</span>
                       )}
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">

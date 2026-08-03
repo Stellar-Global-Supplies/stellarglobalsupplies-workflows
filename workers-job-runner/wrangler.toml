@@ -1,6 +1,6 @@
 name               = "stellar-job-runner"
 main               = "../workers/src/job-runner.js"
-compatibility_date = "2025-04-01"
+compatibility_date = "2024-01-01"
 
 [observability.logs]
 enabled         = true
@@ -8,6 +8,10 @@ invocation_logs = true
 
 [triggers]
 crons = ["* * * * *"]
+
+# Workers AI binding — FLUX image generation
+[ai]
+binding = "AI"
 
 [[d1_databases]]
 binding       = "DB"
@@ -80,6 +84,36 @@ secret_name = "API_BASE_URL"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
 [[secrets_store_secrets]]
+binding     = "GITHUB_TOKEN"
+secret_name = "GITHUB_TOKEN"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "WEBSITE_REPO_OWNER"
+secret_name = "WEBSITE_REPO_OWNER"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "WEBSITE_REPO_NAME"
+secret_name = "WEBSITE_REPO_NAME"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "WEBSITE_BASE_BRANCH"
+secret_name = "WEBSITE_BASE_BRANCH"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "WEBSITE_BLOG_DIR"
+secret_name = "WEBSITE_BLOG_DIR"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "LINKEDIN_NOTIFY_EMAILS"
+secret_name = "LINKEDIN_NOTIFY_EMAILS"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
 binding     = "FB_PAGE_ID"
 secret_name = "FB_PAGE_ID"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
@@ -98,9 +132,3 @@ store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 binding     = "IG_ACCESS_TOKEN"
 secret_name = "IG_ACCESS_TOKEN"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "LINKEDIN_NOTIFY_EMAILS"
-secret_name = "LINKEDIN_NOTIFY_EMAILS"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-

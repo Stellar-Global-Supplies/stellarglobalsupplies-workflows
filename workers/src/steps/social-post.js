@@ -25,6 +25,7 @@
 import { bedrockGenerateJson, bedrockGenerateText } from '../lib/bedrock.js'
 import { getClient }                                from '../lib/supabase.js'
 import { uploadImage, imageExtAndType }             from '../lib/assets.js'
+import { generateAndUploadImage }                   from '../lib/image-gen.js'
 import { nowIso }                                   from '../lib/utils.js'
 import { nextJob, insertApprovalGate }              from '../job-runner.js'
 
@@ -98,63 +99,76 @@ const COMPANY_CONTEXT = `Stellar Global Supplies — key facts:
 
 export async function socialGetOrders(ctx) {
   const { payload, env } = ctx
-  const sb        = getClient(env)
-  const postType  = payload.type || payload.post_type || 'product'
-  const orderId   = payload.order_id || payload.orderId || payload.orderLookup
+  const sb       = getClient(env)
+  const postType = payload.type || payload.post_type || 'product'
 
+  // Fetch the most recent DELIVERED order — no manual input needed
+  // Select only product columns — never expose customer, qty, or price
   let order = null
 
-  if (orderId) {
-    const isUuid = /^[0-9a-f-]{36}$/.test(String(orderId))
-    if (isUuid) {
-      const rows = await sb.select('orders', `id=eq.${orderId}&limit=1`)
-      if (rows.length) order = rows[0]
-    }
-    if (!order) {
-      const recent = await sb.select('orders', 'select=*&order=created_at.desc&limit=100')
-      const needle = String(orderId).toLowerCase()
-      order = recent.find(r =>
-        String(r.id || '').toLowerCase().startsWith(needle) ||
-        String(r.tracking_token || '').toLowerCase().startsWith(needle)
-      ) || null
-    }
-  } else {
-    const limit       = payload.limit || 1
-    const productType = payload.product_type || ''
-    let params        = `select=*&order=created_at.desc&limit=${limit}`
-    if (productType) params += `&product_type=ilike.${encodeURIComponent(`%${productType}%`)}`
-    const rows = await sb.select('orders', params)
-    order = rows[0] || null
+  // Try delivered orders first
+  const deliveredRows = await sb.select('orders',
+    'select=id,material,product_type,status,delivery_timeline&status=eq.Delivered&order=created_at.desc&limit=10'
+  )
+
+  // Pick one that hasn't been posted about yet
+  for (const row of deliveredRows) {
+    const existing = await sb.select('social_posts',
+      `order_id=eq.${encodeURIComponent(row.id)}&type=eq.product&limit=1`
+    )
+    if (!existing.length) { order = row; break }
   }
 
-  // Fallback demo order
+  // Fallback: any recent order if all delivered ones already have posts
   if (!order) {
-    order = {
-      id:               payload.order_id || 'DEMO-001',
-      product_name:     payload.product_name || 'Industrial Cleaning Supplies Bundle',
-      product_type:     payload.product_type || 'Industrial',
-      material:         payload.product_name || 'Industrial Supplies',
-      quantity:         500,
-      unit:             'units',
-      customer_name:    'Demo Customer',
-      status:           'Delivered',
-      payment_status:   'Paid',
+    const recentRows = await sb.select('orders',
+      'select=id,material,product_type,status,delivery_timeline&order=created_at.desc&limit=20'
+    )
+    for (const row of recentRows) {
+      const existing = await sb.select('social_posts',
+        `order_id=eq.${encodeURIComponent(row.id)}&type=eq.product&limit=1`
+      )
+      if (!existing.length) { order = row; break }
     }
   }
 
-  const normalizedOrder = {
-    ...order,
-    product_name:     order.material || order.product_name || '',
-    product_category: order.product_type || '',
-    customer_segment: order.customer_name || '',
-    description: `${order.quantity} ${order.unit || 'units'} of ${order.material} (${order.product_type}) for ${order.customer_name}. Order status: ${order.status}; payment: ${order.payment_status}.`,
+  if (!order) {
+    // All orders already have posts — mark as stopped
+    console.log('[social_get_orders] all orders already have posts — nothing to post')
+    if (ctx.workflow_run_id) {
+      await ctx.d1.update('workflow_runs', {
+        status:       'stopped',
+        completed_at: nowIso(),
+        output:       { skipped: true, reason: 'All recent orders already have social posts' },
+      }, { id: ctx.workflow_run_id })
+    }
+    return
   }
 
-  console.log(`[social_get_orders] order=${order.id} type=${postType}`)
+  // ── Build sanitised order context ─────────────────────────
+  // ONLY expose: product name, product type, delivery status
+  // NEVER expose: customer name, quantity, price, GST, payment status
+  const productName     = (order.material      || '').trim()
+  const productCategory = (order.product_type  || '').trim()
+  const deliveryStatus  = (order.status        || 'Delivered').trim()
+  const deliveredOn     = order.delivery_timeline
+    ? new Date(order.delivery_timeline).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+    : null
+
+  const sanitisedOrder = {
+    id:              order.id,
+    product_name:    productName,
+    product_category: productCategory,
+    delivery_status: deliveryStatus,
+    delivered_on:    deliveredOn,
+  }
+
+  console.log(`[social_get_orders] selected order=${order.id} product="${productName}" category="${productCategory}"`)
+
   await nextJob(ctx, 'social_bedrock_generate_post', {
-    order:       normalizedOrder,
-    orderId:     String(order.id || ''),
-    post_type:   postType,
+    order:     sanitisedOrder,
+    orderId:   String(order.id || ''),
+    post_type: postType,
   })
 }
 
@@ -174,14 +188,21 @@ export async function socialBedrockGeneratePost(ctx) {
   const contextText= payload.contextText || ''
   const workflowRunId = payload.workflowRunId
 
-  // Dedup check for product posts
+  // Dedup guard (secondary — primary dedup now happens in socialGetOrders)
   if (postType === 'product' && payload.orderId) {
     const existing = await sb.select('social_posts',
       `order_id=eq.${encodeURIComponent(payload.orderId)}&type=eq.product&limit=1`
     )
     if (existing.length) {
       console.log(`[social_bedrock_generate_post] duplicate product post — skipping`)
-      return // marks current job done, chain ends
+      if (ctx.workflow_run_id) {
+        await ctx.d1.update('workflow_runs', {
+          status:       'stopped',
+          completed_at: nowIso(),
+          output:       { skipped: true, reason: 'Post already exists for this order' },
+        }, { id: ctx.workflow_run_id })
+      }
+      return
     }
   }
 
@@ -199,21 +220,34 @@ export async function socialBedrockGeneratePost(ctx) {
   // ── Generate text content ────────────────────────────────
   let genPrompt
   if (postType === 'product') {
-    genPrompt = `Write a B2B marketing social media campaign for Stellar Global Supplies about this specific product.
+    const deliveryNote = order.delivered_on
+      ? `Successfully delivered ${order.delivered_on}`
+      : 'Recently delivered'
+    genPrompt = `Write a B2B marketing social media campaign for Stellar Global Supplies showcasing a recently delivered product.
 ${COMPANY_CONTEXT}
-PRODUCT DETAILS:
-- Name: ${order.product_name || ''}
-- Category: ${order.product_category || ''}
-- Description: ${order.description || ''}
-- Customer Segment: ${order.customer_segment || ''}
+
+PRODUCT TO SHOWCASE:
+- Product Name: ${order.product_name || ''}
+- Product Category: ${order.product_category || ''}
+- Delivery Note: ${deliveryNote}
+
+STRICT CONTENT RULES — follow exactly:
+1. NEVER mention customer name, buyer name, client name, or company name of the buyer
+2. NEVER mention quantity, units, pieces, or order size
+3. NEVER mention price, cost, amount, invoice value, or any rupee figure
+4. NEVER say "we delivered X units to Y company"
+5. DO mention: the product name, its industrial applications, quality standards, why buyers need it
+6. DO use the delivery note only as social proof ("Another ${order.product_name} delivery completed")
+7. The post is about the PRODUCT and STELLAR — not about any specific customer
+
 ${prompt ? `Additional instructions: ${prompt}` : ''}
 
 Return JSON with these exact keys:
 {
-  "title": "attention-grabbing post title (max 10 words)",
-  "facebook": "Facebook ad copy — 280 chars max. Lead with buyer pain. Sharp CTA. 3-4 hashtags.",
-  "instagram": "Instagram caption — 180 chars max. Visual and punchy. 4-5 hashtags.",
-  "linkedin": "Full LinkedIn post in PRODUCT POST MODE. Hook, Problem, Product, Who buys it, Why Stellar, CTA, Hashtags. Minimum 1500 characters. No em-dashes. No bullets.",
+  "title": "attention-grabbing post title about the product (max 10 words, no customer mention)",
+  "facebook": "Facebook ad copy — 280 chars max. Lead with buyer pain for this product. Sharp CTA. 3-4 hashtags. No customer/qty/price.",
+  "instagram": "Instagram caption — 180 chars max. Product-focused, visual, punchy. 4-5 hashtags. No customer/qty/price.",
+  "linkedin": "Full LinkedIn post in PRODUCT POST MODE. Hook, Problem, Product details with specs/grades, Who buys this and why, Why Stellar, CTA, Hashtags. Minimum 1500 characters. No em-dashes. No bullets. No customer name. No quantity. No price.",
   "hashtags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7"]
 }`
   } else {
@@ -243,15 +277,17 @@ Return JSON with these exact keys:
   // ── Build image prompt ────────────────────────────────────
   let imgPrompt
   if (postType === 'product') {
-    const ipPrompt = `Write a FLUX image generation prompt (70-90 words) for a B2B marketing photograph that SELLS this product.
-Product: ${order.product_name}
-Category: ${order.product_category}
-Description: ${order.description?.slice(0, 200)}
-Customer segment: ${order.customer_segment}
+    const ipPrompt = `Write a FLUX image generation prompt (70-90 words) for a B2B marketing photograph that showcases this industrial product.
+Product Name: ${order.product_name}
+Product Category: ${order.product_category}
 
-This is NOT a plain product photo. Show it in a real industrial/commercial setting.
-Rules: show product in context, natural industrial lighting, DSLR editorial feel, photorealistic, sharp focus, slightly blurred background.
-Output ONLY the prompt — no explanation, no quotes`
+Rules:
+- Show the product in a real industrial/commercial setting (factory floor, construction site, workshop, warehouse)
+- Natural industrial lighting, DSLR editorial style, photorealistic
+- Sharp focus on product, slightly blurred industrial background
+- NO people, NO text, NO logos, NO price tags
+- Convey quality, strength, and professional grade
+Output ONLY the prompt text — no explanation, no quotes, no preamble`
 
     try {
       imgPrompt = (await bedrockGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
@@ -328,9 +364,9 @@ Output ONLY the prompt — no explanation, no quotes`
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function socialImageSubmit(ctx) {
-  const { payload } = ctx
-  const imgPrompt   = payload.imgPrompt || ''
-  const postId      = payload.postId
+  const { payload, env } = ctx
+  const imgPrompt = payload.imgPrompt || ''
+  const postId    = payload.postId
 
   if (!imgPrompt) {
     console.log('[social_image_submit] no image prompt — skipping to approval')
@@ -338,32 +374,33 @@ export async function socialImageSubmit(ctx) {
     return
   }
 
-  try {
-    const res = await fetch(`${FLUX_BASE}/gradio_api/call/infer`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        data: [imgPrompt, 0, true, 1024, 1024, 4],
-      }),
-    })
+  console.log(`[social_image_submit] generating image via Workers AI FLUX postId=${postId}`)
 
-    if (!res.ok) throw new Error(`FLUX submit failed ${res.status}: ${await res.text()}`)
+  // Workers AI FLUX — synchronous, no polling needed
+  const storageKey = `social-posts/${payload.post_type || 'product'}/${crypto.randomUUID()}`
+  const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
+    width:  1024,
+    height: 1024,
+  })
 
-    const result  = await res.json()
-    const eventId = result.event_id
-    if (!eventId) throw new Error(`FLUX: no event_id in response: ${JSON.stringify(result)}`)
-
-    console.log(`[social_image_submit] queued eventId=${eventId} postId=${postId}`)
-    await nextJob(ctx, 'social_image_poll', {
-      ...payload,
-      imageEventId: eventId,
-      imageRetries: 0,
-    })
-  } catch (e) {
-    // Image is non-blocking — proceed to approval without image
-    console.warn(`[social_image_submit] FLUX submit failed (${e.message}) — proceeding without image`)
-    await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(payload))
+  // Update social_posts row with image url if generated
+  if (image?.url && postId) {
+    try {
+      const sb = getClient(env)
+      await sb.update('social_posts', {
+        image_url:    image.url,
+        image_s3_key: image.key,
+      }, `id=eq.${postId}`)
+    } catch (e) {
+      console.warn(`[social_image_submit] post update failed (non-fatal): ${e.message}`)
+    }
   }
+
+  const updatedPayload = image?.url
+    ? { ...payload, post: { ...(payload.post || {}), image_url: image.url } }
+    : payload
+
+  await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
 }
 
 

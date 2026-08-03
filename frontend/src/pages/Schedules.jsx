@@ -19,7 +19,7 @@ const WORKFLOW_TYPES = [
     icon: Users,
     color: 'bg-blue-50 text-blue-700 border-blue-200',
     iconBg: 'bg-blue-600',
-    description: 'AI discovers companies · Hunter.io finds emails · Gmail sends outreach',
+    description: 'Tavily finds real companies · Groq extracts contacts · Bedrock drafts email · Gmail sends outreach',
   },
   {
     key: 'social-product',
@@ -35,7 +35,7 @@ const WORKFLOW_TYPES = [
     icon: Code2,
     color: 'bg-purple-50 text-purple-700 border-purple-200',
     iconBg: 'bg-purple-600',
-    description: 'Reads ai_context.md from S3 → AI post + image → approval → platforms',
+    description: 'Custom prompt → AI post + image → approval → platforms',
   },
   {
     key: 'blog',

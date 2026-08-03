@@ -1,10 +1,7 @@
-# Stellar Global Supplies — API Router Worker
-
 name               = "stellarglobalsupplies-workflows"
 main               = "src/api-router.js"
-compatibility_date = "2025-04-01"
-
-workers_dev = true
+compatibility_date = "2024-01-01"
+workers_dev        = true
 
 [observability.logs]
 enabled         = true
@@ -12,6 +9,10 @@ invocation_logs = true
 
 [triggers]
 crons = []
+
+# Workers AI binding — FLUX image generation (10k free Neurons/day)
+[ai]
+binding = "AI"
 
 [[d1_databases]]
 binding       = "DB"
@@ -41,44 +42,4 @@ store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 [[secrets_store_secrets]]
 binding     = "BEDROCK_REGION"
 secret_name = "BEDROCK_REGION"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "GROQ_API_KEY"
-secret_name = "GROQ_API_KEY"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "TAVILY_API_KEY"
-secret_name = "TAVILY_API_KEY"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "GMAIL_CLIENT_ID"
-secret_name = "GMAIL_CLIENT_ID"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "GMAIL_CLIENT_SECRET"
-secret_name = "GMAIL_CLIENT_SECRET"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "GMAIL_REFRESH_TOKEN"
-secret_name = "GMAIL_REFRESH_TOKEN"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "SENDER_EMAIL"
-secret_name = "SENDER_EMAIL"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "REVIEWER_EMAIL"
-secret_name = "REVIEWER_EMAIL"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "API_BASE_URL"
-secret_name = "API_BASE_URL"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
