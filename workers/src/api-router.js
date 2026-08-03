@@ -631,7 +631,7 @@ function validateWorkflowInput(wfType, body) {
       if (!body.leadId && !body.lead_id) return 'Missing required field: leadId'
       break
     case 'social-product':
-      if (!body.order_id && !body.product_name) return 'Missing required field: order_id or product_name'
+      // No required fields — workflow auto-picks latest unposted order
       break
     case 'social-tech':
       if (!body.repo_name) return 'Missing required field: repo_name'
