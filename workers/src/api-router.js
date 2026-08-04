@@ -98,7 +98,7 @@ const FIRST_STEP = {
   'lead-generation':    'lead_select_product_and_industry',
   'lead-email-existing':'lead_load_existing',
   'social-product':     'social_get_orders',
-  'social-tech':        'social_get_orders',
+  'social-tech':        'social_get_tech_context',
   'blog':               'blog_generate_outline',
   'payment-followup':   'payment_fetch_overdue',
 }

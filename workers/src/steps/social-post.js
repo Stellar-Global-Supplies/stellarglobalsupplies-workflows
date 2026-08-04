@@ -92,6 +92,52 @@ const COMPANY_CONTEXT = `Stellar Global Supplies — key facts:
 - Website: stellarglobalsupplies.com`
 
 
+// ── Context repo (hardcoded) ─────────────────────────────────────────────────
+const CONTEXT_REPO = 'Stellar-Global-Supplies/workflows-socialposts-context'
+
+/**
+ * Fetch context file from GitHub repo.
+ * The context repo has markdown files describing each tech product/feature.
+ * One file per topic e.g. lead-generation.md, blog-automation.md etc.
+ * If a specific file is requested, fetch it. Otherwise list all and pick next unposted.
+ */
+async function fetchContextFromGitHub(env, filename = null) {
+  const resolveSecret = async (val) => {
+    if (!val) return undefined
+    if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
+    return String(val)
+  }
+  const token = await resolveSecret(env.GITHUB_TOKEN)
+  const headers = {
+    Accept:                 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent':           'StellarWorkflows/1.0',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+
+  const [owner, repo] = CONTEXT_REPO.split('/')
+
+  if (filename) {
+    // Fetch specific file
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${filename}`, { headers })
+    if (!res.ok) throw new Error(`GitHub fetch ${filename}: ${res.status}`)
+    const data    = await res.json()
+    const content = atob(data.content.replace(/\n/g, ''))
+    return { filename, content, sha: data.sha }
+  }
+
+  // List all markdown files in the repo root
+  const listRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/`, { headers })
+  if (!listRes.ok) throw new Error(`GitHub list repo: ${listRes.status}`)
+  const files = await listRes.json()
+  const mdFiles = files
+    .filter(f => f.type === 'file' && f.name.endsWith('.md') && f.name !== 'README.md')
+    .map(f => f.name)
+
+  if (!mdFiles.length) throw new Error(`No markdown files found in ${CONTEXT_REPO}`)
+  return { files: mdFiles }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Step 1: Get Orders
 // Mirrors: get_orders.py
@@ -169,6 +215,59 @@ export async function socialGetOrders(ctx) {
     order:     sanitisedOrder,
     orderId:   String(order.id || ''),
     post_type: postType,
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 1b: Get Tech Context (for social-tech workflow)
+// Fetches context from GitHub repo — no user input needed
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function socialGetTechContext(ctx) {
+  const { payload, env } = ctx
+  const sb = getClient(env)
+
+  // List all context files from the repo
+  let files = []
+  try {
+    const result = await fetchContextFromGitHub(env, null)
+    files = result.files || []
+  } catch (e) {
+    throw new Error(`Cannot read context repo ${CONTEXT_REPO}: ${e.message}`)
+  }
+
+  if (!files.length) throw new Error(`No context files found in ${CONTEXT_REPO}`)
+
+  // Pick next file that hasn't been posted about yet
+  const existingPosts = await sb.select('social_posts',
+    'select=repo_name&type=eq.tech&limit=100'
+  )
+  const postedFiles = new Set((existingPosts || []).map(p => p.repo_name).filter(Boolean))
+
+  let selected = files.find(f => !postedFiles.has(f))
+
+  if (!selected) {
+    // All files posted — restart rotation from first
+    console.log('[social_get_tech_context] all context files posted — restarting rotation')
+    selected = files[0]
+  }
+
+  console.log(`[social_get_tech_context] selected context file: ${selected}`)
+
+  // Fetch full content of selected file
+  let content = ''
+  try {
+    const fileData = await fetchContextFromGitHub(env, selected)
+    content = fileData.content || ''
+  } catch (e) {
+    throw new Error(`Cannot fetch ${selected} from ${CONTEXT_REPO}: ${e.message}`)
+  }
+
+  await nextJob(ctx, 'social_tech_generate_post', {
+    contextFile:    selected,
+    contextContent: content,
+    post_type:      'tech',
+    platforms:      payload.platforms || { linkedin: true, facebook: true, instagram: true },
   })
 }
 
@@ -359,7 +458,222 @@ Output ONLY the prompt — no explanation, no quotes`
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 3: Submit Image to HF Gradio FLUX
+// Step 2b: Generate Tech Post from Context File
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function socialTechGeneratePost(ctx) {
+  const { payload, env } = ctx
+  const sb             = getClient(env)
+  const contextFile    = payload.contextFile    || ''
+  const contextContent = payload.contextContent || ''
+  const workflowRunId  = payload.workflowRunId
+
+  if (!contextContent) throw new Error('No context content available')
+
+  // Parse the context file to understand what this tech topic is about
+  const topicName = contextFile.replace('.md', '').replace(/-/g, ' ')
+
+  // Dedup — skip if already posted about this context file
+  const existing = await sb.select('social_posts',
+    `repo_name=eq.${encodeURIComponent(contextFile)}&type=eq.tech&limit=1`
+  )
+  if (existing.length) {
+    console.log(`[social_tech_generate_post] already posted about ${contextFile} — stopping`)
+    if (ctx.workflow_run_id) {
+      await ctx.d1.update('workflow_runs', {
+        status:       'stopped',
+        completed_at: nowIso(),
+        output:       { skipped: true, reason: `Already posted about ${contextFile}` },
+      }, { id: ctx.workflow_run_id })
+    }
+    return
+  }
+
+  const TECH_SYSTEM = `You are a senior B2B marketing copywriter for Stellar Global Supplies, Pune, India.
+Stellar is a B2B industrial supply company selling Mild Steel, Stainless Steel, and Industrial Fasteners.
+They have built a modern tech platform to manage their supply chain and customer workflows.
+
+CRITICAL WRITING RULES:
+- Every post must connect technology back to the STEEL SUPPLY BUSINESS
+- The tech exists to serve steel buyers better — always make this link explicit
+- LinkedIn: formal, educational, business-outcome focused
+- Facebook/Instagram: warmer, still professional
+- Never make it sound like a software company — always position as a steel supplier WITH good tech
+- Tone: confident, expert, genuinely helpful to procurement managers and plant engineers`
+
+  const genPrompt = `Write a B2B social media campaign for Stellar Global Supplies about a specific technology feature or workflow they've built.
+
+CONTEXT FROM OUR TECH DOCUMENTATION:
+---
+${contextContent.slice(0, 3000)}
+---
+
+TOPIC: ${topicName}
+
+WHAT TO WRITE ABOUT:
+1. What this technology/feature does (from the context above)
+2. WHY it was built — what problem it solves for steel buyers
+3. How it makes Stellar a better, more reliable steel supply partner
+4. What a procurement manager or plant engineer gains from this
+
+WRITING STRUCTURE (LinkedIn — follow exactly):
+LINE 1: Hook — a specific business outcome for a steel buyer, or a common procurement frustration solved
+PARAGRAPH 1 — THE BUYER'S PROBLEM: A real pain point in B2B steel procurement that this tech addresses
+PARAGRAPH 2 — WHAT WE BUILT: Explain the feature from the buyer's benefit perspective (not technical jargon)
+PARAGRAPH 3 — WHAT THIS MEANS FOR YOUR BUSINESS: Concrete outcomes — faster quotes, fewer errors, better tracking
+PARAGRAPH 4 — STELLAR AS YOUR SUPPLY PARTNER: Bridge back firmly to steel supply — this tech makes our steel supply better
+CTA: Drive supply enquiries — call +91 9637655556 or visit stellarglobalsupplies.com
+HASHTAGS: Mix of tech AND B2B supply/steel industry tags
+
+Rules: Minimum 1500 chars for LinkedIn. No em-dashes. No bullet points. Paragraphs only.
+
+Return JSON with these exact keys:
+{
+  "title": "post title — outcome focused, max 12 words, no buzzwords",
+  "facebook": "Facebook post — 280 chars max. Lead with buyer outcome. 3-4 hashtags. Supply CTA.",
+  "instagram": "Instagram caption — 180 chars max. Business outcome first. 4-5 hashtags.",
+  "linkedin": "Full LinkedIn post following the structure above — minimum 1500 chars",
+  "tech_stack": ["technology1", "technology2", "technology3"],
+  "key_benefit": "one sentence: the single most important benefit for a steel buyer",
+  "hashtags": ["B2BSupplyChain", "IndustrialSupply", "SteelSupplier", "Procurement", "StellarGlobalSupplies", "MadeInIndia", "B2BIndia"]
+}`
+
+  const contentData = await bedrockGenerateJson(env, genPrompt, TECH_SYSTEM, 3000)
+  console.log(`[social_tech_generate_post] title="${contentData.title}"`)
+
+  const title      = contentData.title || topicName
+  const caption    = contentData.linkedin || contentData.facebook || ''
+  const hashtags   = contentData.hashtags || []
+  const techStack  = contentData.tech_stack || []
+  const keyBenefit = contentData.key_benefit || ''
+  const today      = new Date()
+  const weekStart  = new Date(today); weekStart.setDate(today.getDate() - today.getDay())
+
+  // Save post row
+  const row = {
+    platform:           'linkedin',
+    caption:            caption.slice(0, 2000),
+    raw_caption:        caption.slice(0, 2000),
+    hashtags,
+    status:             'pending_approval',
+    orders_included:    [],
+    week_start:         weekStart.toISOString().slice(0, 10),
+    type:               'tech',
+    title:              title || null,
+    content:            (contentData.facebook || '').slice(0, 500) || null,
+    platforms:          payload.platforms || { facebook: true, instagram: true, linkedin: true },
+    repo_name:          contextFile,
+    workflow_run_id:    workflowRunId || null,
+  }
+
+  const saved = await sb.insert('social_posts', row)
+  console.log(`[social_tech_generate_post] saved postId=${saved.id}`)
+
+  // Build image prompt — tech stack logos + key benefit context
+  const techDisplay  = techStack.slice(0, 4).join(', ')
+  const imgPrompt    = `Professional editorial technology photograph for a B2B industrial supply company post.
+Topic: ${topicName} — ${keyBenefit}
+Tech stack shown: ${techDisplay || 'web dashboard, cloud, mobile'}
+
+Visual style:
+- A laptop or desktop monitor showing a clean, modern supply chain dashboard with navy and gold UI
+- Screen displays order tracking, workflow steps, or product catalogue for steel/industrial supply
+- Natural office lighting, DSLR editorial style, shallow depth of field
+- Background: professional Indian office setting, steel or industrial product visible in background
+- If tech stack includes specific tools (Cloudflare, AWS etc), show subtle logo stickers on laptop lid
+- Sharp, photorealistic, no text overlays, no people
+- Convey: modern, reliable, professional B2B technology`
+
+  await nextJob(ctx, 'social_tech_image_submit', {
+    postId:       saved.id,
+    post:         { ...saved, title, content: contentData.facebook || '' },
+    contentData,
+    imgPrompt,
+    contextFile,
+    post_type:    'tech',
+    techStack,
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 3: Submit Image — Tech Post (Workers AI FLUX)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function socialTechImageSubmit(ctx) {
+  const { payload, env } = ctx
+  const imgPrompt = payload.imgPrompt || payload.imagePrompt || ''
+  const postId    = payload.postId
+
+  console.log(`[social_tech_image_submit] generating image via Workers AI FLUX postId=${postId}`)
+
+  const storageKey = `social-posts/tech/${crypto.randomUUID()}`
+  const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
+    width:  1024,
+    height: 1024,
+  })
+
+  if (image?.url && postId) {
+    try {
+      const sb = getClient(env)
+      await sb.update('social_posts', {
+        image_url:    image.url,
+        image_s3_key: image.key,
+      }, `id=eq.${postId}`)
+    } catch (e) {
+      console.warn(`[social_tech_image_submit] post update failed (non-fatal): ${e.message}`)
+    }
+  }
+
+  const updatedPayload = image?.url
+    ? { ...payload, post: { ...(payload.post || {}), image_url: image.url } }
+    : payload
+
+  await insertApprovalGate(ctx, 'social_post_to_platforms', buildTechApprovalPreview(updatedPayload))
+}
+
+function buildTechApprovalPreview(payload) {
+  const post     = payload.post     || {}
+  const content  = payload.contentData || {}
+  const techStack = (payload.techStack || []).slice(0, 6)
+  const imageHtml = post.image_url
+    ? `<img src="${post.image_url}" style="max-width:100%;border-radius:8px;margin:12px 0 20px"/>`
+    : '<p style="color:#94a3b8;font-size:12px;font-style:italic">Image generating or unavailable</p>'
+
+  return {
+    referenceId: payload.postId,
+    previewHtml: `
+      <div style="font-family:Arial,sans-serif;max-width:600px">
+        <h2 style="color:#0A2547;margin:0 0 6px">${post.title || 'Tech Post'}</h2>
+        <p style="color:#64748b;font-size:12px;margin:0 0 4px">Context: <strong>${payload.contextFile || ''}</strong></p>
+        ${techStack.length ? `<p style="color:#64748b;font-size:12px;margin:0 0 16px">Tech: ${techStack.join(' · ')}</p>` : ''}
+        ${imageHtml}
+        <div style="margin:12px 0">
+          <p style="font-weight:600;color:#0A2547;font-size:13px;margin-bottom:8px">LinkedIn Preview (first 600 chars)</p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;
+                      white-space:pre-wrap;font-size:13px;color:#334155;line-height:1.6">
+            ${(content.linkedin || '').slice(0, 600)}...
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+          <div>
+            <p style="font-weight:600;color:#1877F2;font-size:12px;margin-bottom:6px">Facebook</p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:12px">
+              ${content.facebook || ''}
+            </div>
+          </div>
+          <div>
+            <p style="font-weight:600;color:#E1306C;font-size:12px;margin-bottom:6px">Instagram</p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:12px">
+              ${content.instagram || ''}
+            </div>
+          </div>
+        </div>
+      </div>`,
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 3: Submit Image — Product Post
 // Mirrors: _flux_gradio() step 1 (submit)
 // ═══════════════════════════════════════════════════════════════════════════
 

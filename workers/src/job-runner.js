@@ -13,6 +13,9 @@ import {
   socialBedrockGeneratePost,
   socialImageSubmit,
   socialPostToPlatforms,
+  socialGetTechContext,
+  socialTechGeneratePost,
+  socialTechImageSubmit,
 } from './steps/social-post.js'
 import { nowIso }    from './lib/utils.js'
 import {
@@ -292,12 +295,17 @@ const STEP_HANDLERS = {
   lead_approval_gate:          (ctx) => leadEmailApprovalGate(ctx),
   lead_send_email:             (ctx) => leadEmailSendEmail(ctx),
 
-  // ── Social Product / Tech ──────────────────────────────────── LIVE ✓ ──
+  // ── Social Product ─────────────────────────────────────────── LIVE ✓ ──
   social_get_orders:            (ctx) => socialGetOrders(ctx),
   social_bedrock_generate_post: (ctx) => socialBedrockGeneratePost(ctx),
   social_image_submit:          (ctx) => socialImageSubmit(ctx),
-  // social_image_poll removed — Workers AI FLUX is synchronous
   social_post_to_platforms:     (ctx) => socialPostToPlatforms(ctx),
+
+  // ── Social Tech ─────────────────────────────────────────────── LIVE ✓ ──
+  social_get_tech_context:      (ctx) => socialGetTechContext(ctx),
+  social_tech_generate_post:    (ctx) => socialTechGeneratePost(ctx),
+  social_tech_image_submit:     (ctx) => socialTechImageSubmit(ctx),
+  // social_post_to_platforms shared between product and tech
 
   // ── Blog ──────────────────────────────────────────────────── LIVE ✓ ──
   blog_generate_outline:   (ctx) => blogGenerateOutline(ctx),
