@@ -92,7 +92,7 @@ export default {
 const VALID_WORKFLOW_TYPES = [
   'lead-generation', 'lead-email-existing', 'social-product',
   'social-tech', 'blog', 'payment-followup',
-  'cur-forwarder', 'postgres-forwarder', 'ai-sync', 's3-cleanup',
+  'cur-forwarder', 'postgres-forwarder', 'ai-sync', 's3-cleanup', 'brevo-sync',
 ]
 
 const FIRST_STEP = {
@@ -106,6 +106,7 @@ const FIRST_STEP = {
   'postgres-forwarder': 'pg_run_forwarder',
   'ai-sync':            'ai_sync_run',
   's3-cleanup':         's3_cleanup_run',
+  'brevo-sync':         'brevo_sync_run',
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -625,7 +626,7 @@ async function handleDataAction(path, request, sb, d1) {
 // SCHEDULES — fully in D1
 // ═══════════════════════════════════════════════════════════════════════════
 
-const VALID_SCHEDULE_TYPES = ['lead-generation','lead-email-existing','social-product','social-tech','blog']
+const VALID_SCHEDULE_TYPES = ['lead-generation','lead-email-existing','social-product','social-tech','blog','brevo-sync']
 
 function validateWorkflowInput(wfType, body) {
   switch (wfType) {
@@ -658,6 +659,9 @@ function validateWorkflowInput(wfType, body) {
       break
     case 's3-cleanup':
       // No required fields — triggers S3 lifecycle cleanup on demand
+      break
+    case 'brevo-sync':
+      // No required fields — triggers Brevo sync on demand
       break
   }
   return null
