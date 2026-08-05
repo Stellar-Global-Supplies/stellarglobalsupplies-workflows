@@ -1,0 +1,37 @@
+name               = "brevo-sync"
+main               = "index.js"
+compatibility_date = "2025-04-01"
+workers_dev        = true
+
+# Node.js compat required for the `pg` driver (same as ai-sync)
+compatibility_flags = ["nodejs_compat"]
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
+# No [triggers] crons here — scheduling is controlled via D1 workflow_schedules
+# (brevo-sync-schedule-001 seed row). The schedule-runner fires this via
+# the job-runner → SVC_BREVO_SYNC service binding.
+
+# ── Secrets (Cloudflare Secrets Store — same store as all other workers) ──
+[[secrets_store_secrets]]
+binding     = "SUPABASE_URL"
+secret_name = "SUPABASE_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_SERVICE_KEY"
+secret_name = "SUPABASE_SERVICE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+# Separate NeonDB URL for the marketing/brevo tables
+[[secrets_store_secrets]]
+binding     = "ADMIN_NEON_DB_URL"
+secret_name = "ADMIN_NEON_DB_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "BREVO_API_KEY"
+secret_name = "BREVO_API_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"

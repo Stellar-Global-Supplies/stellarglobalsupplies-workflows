@@ -22,6 +22,8 @@ const FIRST_STEP = {
   'postgres-forwarder':  'pg_run_forwarder',
   'ai-sync':             'ai_sync_run',
   's3-cleanup':          's3_cleanup_run',
+  'brevo-sync':          'brevo_sync_run',
+  'brevo_sync':          'brevo_sync_run',
 }
 
 export default {

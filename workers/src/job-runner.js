@@ -54,6 +54,7 @@ import {
   pgRunForwarder,
   aiSyncRun,
   s3CleanupRun,
+  brevoSyncRun,
 } from './steps/tech-jobs.js'
 
 export default {
@@ -331,4 +332,7 @@ const STEP_HANDLERS = {
   pg_run_forwarder:            (ctx) => pgRunForwarder(ctx),
   ai_sync_run:                 (ctx) => aiSyncRun(ctx),
   s3_cleanup_run:              (ctx) => s3CleanupRun(ctx),
+
+  // ── Brevo Contact Sync ──────────────────────────────────────────── LIVE ✓ ──
+  brevo_sync_run:              (ctx) => brevoSyncRun(ctx),
 }

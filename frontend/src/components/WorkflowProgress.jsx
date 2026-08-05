@@ -63,10 +63,11 @@ export const LEAD_EMAIL_STEPS = {
 }
 
 export const TECH_JOB_STEPS = {
-  cur_run_forwarder: 'Running CUR Forwarder',
-  pg_run_forwarder:  'Running Postgres Forwarder',
-  ai_sync_run:       'Running AI Data Sync',
-  s3_cleanup_run:    'Running S3 Cleanup',
+  cur_run_forwarder:  'Running CUR Forwarder',
+  pg_run_forwarder:   'Running Postgres Forwarder',
+  ai_sync_run:        'Running AI Data Sync',
+  s3_cleanup_run:     'Running S3 Cleanup',
+  brevo_sync_run:     'Running Brevo Contact Sync',
 }
 
 export const TECH_STEPS = {
@@ -331,4 +332,4 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
       )}
     </div>
   )
-} 
+}

@@ -105,3 +105,19 @@ export async function s3CleanupRun(ctx) {
     }, { id: ctx.workflow_run_id })
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step: Run Brevo Sync
+// Calls https://<brevo-sync>/run — syncs Supabase contacts to NeonDB + Brevo
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function brevoSyncRun(ctx) {
+  const { env } = ctx
+  const result = await triggerForwarder(env.SVC_BREVO_SYNC, 'Brevo Sync', 'brevo_sync_run')
+
+  if (ctx.workflow_run_id) {
+    await ctx.d1.update('workflow_runs', {
+      output: { ...result, step: 'brevo_sync_run' },
+    }, { id: ctx.workflow_run_id })
+  }
+}

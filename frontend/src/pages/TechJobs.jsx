@@ -4,7 +4,7 @@ import { startWorkflow } from '../services/api'
 import { PageHeader } from '../components/ui'
 import WorkflowProgress, { TECH_JOB_STEPS } from '../components/WorkflowProgress'
 import {
-  Activity, Play, Database, BarChart3, Cloud, RefreshCw, Brain, Trash2,
+  Activity, Play, Database, BarChart3, Cloud, RefreshCw, Brain, Trash2, Mail,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -76,6 +76,23 @@ const JOBS = [
       'Writes per-table results to _sync_log audit table',
     ],
     secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'ADMIN_NEON_DB_URL'],
+  },
+  {
+    key:        'brevo-sync',
+    title:      'Brevo Contact Sync',
+    icon:       Mail,
+    color:      'bg-sky-50 text-sky-700 border-sky-200',
+    iconBg:     'bg-sky-600',
+    schedule:   'Every 6 hours (D1 schedule)',
+    description:
+      'Fetches marketing contacts from Supabase (orders, quote_customers, leads), mirrors them into NeonDB slim tables, then batch-imports them into 4 separate Brevo lists.',
+    whatItDoes: [
+      'Pulls orders, quote_customers, leads from Supabase REST API (paginated)',
+      'Upserts contact rows into NeonDB orders_contacts, quote_contacts, leads_contacts',
+      'Reads word_emails from NeonDB (manually imported from Word docs)',
+      'Batch-imports into 4 Brevo lists — creates lists automatically if missing',
+    ],
+    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'ADMIN_NEON_DB_URL', 'BREVO_API_KEY'],
   },
 ]
 
@@ -206,13 +223,14 @@ export default function TechJobs() {
       <div className="mt-6 flex items-start gap-2.5 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
         <Activity size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-blue-700 leading-relaxed">
-          <p className="font-medium mb-1">Automated runs still happen via cron</p>
+          <p className="font-medium mb-1">Automated runs are scheduled via D1</p>
           <p>
-            All workers keep their own Cloudflare Cron schedules —
+            All workers are triggered by the schedule-runner reading <code className="bg-white/60 px-1 rounded">workflow_schedules</code> in D1 —
             <code className="bg-white/60 px-1 rounded">0 */8 * * *</code> for CUR,
             <code className="bg-white/60 px-1 rounded">0 * * * *</code> for Postgres &amp; AI Sync,
-            <code className="bg-white/60 px-1 rounded">0 2 * * *</code> for S3 Cleanup.
-            This page is for on-demand runs with live workflow progress.
+            <code className="bg-white/60 px-1 rounded">0 2 * * *</code> for S3 Cleanup,
+            <code className="bg-white/60 px-1 rounded">0 */6 * * *</code> for Brevo Sync.
+            This page triggers on-demand runs with live workflow progress.
           </p>
         </div>
       </div>
