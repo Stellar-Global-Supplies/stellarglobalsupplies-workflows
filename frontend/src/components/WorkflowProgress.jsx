@@ -62,6 +62,20 @@ export const LEAD_EMAIL_STEPS = {
   lead_send_email:          'Sending outreach email',
 }
 
+export const TECH_JOB_STEPS = {
+  cur_run_forwarder: 'Running CUR Forwarder',
+  pg_run_forwarder:  'Running Postgres Forwarder',
+  ai_sync_run:       'Running AI Data Sync',
+  s3_cleanup_run:    'Running S3 Cleanup',
+}
+
+export const TECH_STEPS = {
+  social_get_tech_context:   'Fetching tech context repo',
+  social_tech_generate_post: 'AI generating tech post',
+  social_tech_image_submit:  'Generating post image',
+  social_post_to_platforms:  'Publishing to platforms',
+}
+
 // ── Status colours ─────────────────────────────────────────────────────────
 
 const STATUS = {
@@ -317,4 +331,4 @@ export default function WorkflowProgress({ runId, onComplete, onClose, stepLabel
       )}
     </div>
   )
-}
+} 

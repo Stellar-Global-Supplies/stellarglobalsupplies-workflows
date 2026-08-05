@@ -18,6 +18,10 @@ const FIRST_STEP = {
   'social-tech':         'social_get_orders',
   'social_tech':         'social_get_orders',
   'blog':                'blog_generate_outline',
+  'cur-forwarder':       'cur_run_forwarder',
+  'postgres-forwarder':  'pg_run_forwarder',
+  'ai-sync':             'ai_sync_run',
+  's3-cleanup':          's3_cleanup_run',
 }
 
 export default {

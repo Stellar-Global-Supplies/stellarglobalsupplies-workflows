@@ -142,6 +142,15 @@ workflow.stellarglobalsupplies.com
 - 🔄 Regenerate with AI feedback
 - 📧 Email action links (approve/reject via email)
 
+### 8. Tech Jobs
+- ⚙️ On-demand triggers for internal Cloudflare Workers
+- 📊 CUR Forwarder — pushes AWS Cost & Usage Report metrics to New Relic
+- 🗄️ Postgres Forwarder — pushes Supabase + NeonDB pg_stat_* metrics to New Relic
+- 🧠 AI Sync — syncs whitelisted Supabase business data to Neon for Stellar AI
+- 🧹 S3 Cleanup — enforces per-bucket S3 retention policies, skips non-existent buckets
+- 🔄 Live workflow progress panel (same as other workflows)
+- ⏰ Centralized scheduling via workflow_schedules table (replaces individual worker crons)
+
 ---
 
 ## 🛠️ Tech Stack
@@ -161,6 +170,7 @@ workflow.stellarglobalsupplies.com
 | **Search** | Tavily API |
 | **IaC** | Wrangler CLI |
 | **CI/CD** | GitHub Actions (optional) |
+| **Forwarders** | cur-forwarder, postgres-forwarder, s3-cleanup (New Relic ingest) |
 
 ---
 
@@ -184,6 +194,9 @@ workflow.stellarglobalsupplies.com
 cd workers
 wrangler d1 create stellar-workflows
 wrangler d1 execute stellar-workflows --file=../d1/schema.sql
+
+# Seed initial tech job schedules
+wrangler d1 execute stellar-workflows --file=../d1/seed-tech-job-schedules.sql
 ```
 
 ### 2. Setup Supabase
@@ -239,6 +252,19 @@ wrangler deploy
 
 # Deploy job runner
 cd workers-job-runner
+wrangler deploy
+
+# Deploy forwarders
+cd workers-cur-forwarder
+wrangler deploy
+
+cd workers-postgres-forwader
+wrangler deploy
+
+cd workers-ai-sync
+wrangler deploy
+
+cd workers-s3-cleanup
 wrangler deploy
 ```
 

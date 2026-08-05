@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS approval_queue (
   preview_html     TEXT DEFAULT '',
   status           TEXT NOT NULL DEFAULT 'pending'
                    CHECK (status IN ('pending','approved','rejected','expired')),
-  review_note      TEXT,
+  review_note      TEXT,  
   email_token      TEXT,
   token_expires_at TEXT,
   token_used_at    TEXT,

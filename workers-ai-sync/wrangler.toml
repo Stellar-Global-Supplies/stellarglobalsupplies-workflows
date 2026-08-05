@@ -1,0 +1,26 @@
+name               = "ai-sync"
+main               = "index.js"
+compatibility_date = "2025-04-01"
+
+# Enable Node.js compat for the `pg` driver
+node_compat = true
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
+# ── Secrets (via Cloudflare Secrets Store — same pattern as other workers) ─
+[[secrets_store_secrets]]
+binding     = "SUPABASE_URL"
+secret_name = "SUPABASE_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_SERVICE_KEY"
+secret_name = "SUPABASE_SERVICE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "ADMIN_NEON_DB_URL"
+secret_name = "ADMIN_NEON_DB_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"

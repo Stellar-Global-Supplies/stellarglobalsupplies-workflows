@@ -1,0 +1,34 @@
+name               = "cur-forwarder"
+main               = "index.js"
+compatibility_date = "2025-04-01"
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
+# ── Worker variables ───────────────────────────────────────────────────────
+[vars]
+NEW_RELIC_REGION = "eu"   # change to "us" if your NR account is in US
+
+# ── KV namespace for dedup state (replaces cur-state.json on state branch) ─
+# Create with: wrangler kv:namespace create CUR_STATE_KV
+[[kv_namespaces]]
+binding    = "CUR_STATE_KV"
+id         = "c7291739eeb24194b543097ffe9b09a6"
+preview_id = "c7291739eeb24194b543097ffe9b09a6"
+
+# ── Secrets (via Cloudflare Secrets Store — same pattern as other workers) ─
+[[secrets_store_secrets]]
+binding     = "NEW_RELIC_LICENSE_KEY"
+secret_name = "NEW_RELIC_LICENSE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_URL"
+secret_name = "SUPABASE_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_SERVICE_KEY"
+secret_name = "SUPABASE_SERVICE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"

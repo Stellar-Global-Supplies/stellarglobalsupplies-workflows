@@ -9,6 +9,13 @@ invocation_logs = true
 [triggers]
 crons = ["* * * * *"]
 
+# ── Forwarder URLs — used by Tech Jobs workflow steps to trigger remote workers ──
+[vars]
+CUR_FORWARDER_URL      = "https://cur-forwarder.workwithprasadbhavsar.workers.dev"
+POSTGRES_FORWARDER_URL = "https://postgres-forwarder.workwithprasadbhavsar.workers.dev"
+AI_SYNC_URL            = "https://ai-sync.workwithprasadbhavsar.workers.dev"
+S3_CLEANUP_URL         = "https://s3-cleanup.workwithprasadbhavsar.workers.dev"
+
 # Workers AI binding — FLUX image generation
 [ai]
 binding = "AI"

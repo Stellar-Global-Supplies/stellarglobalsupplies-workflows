@@ -1,0 +1,15 @@
+{
+  "name": "s3-cleanup",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker — S3 lifecycle cleanup with per-bucket retention policies",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev":    "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail":   "wrangler tail"
+  },
+  "devDependencies": {
+      "wrangler": "^4.0.0"
+  }
+}

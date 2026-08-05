@@ -5,7 +5,8 @@ import { PageHeader, EmptyState, FormField, Modal, Skeleton } from '../component
 import {
   CalendarClock, Plus, Pencil, Trash2, Power, PowerOff,
   Users, Share2, Code2, FileText, ChevronDown, ChevronUp,
-  Clock, Calendar, Facebook, Instagram, Linkedin
+  Clock, Calendar, Facebook, Instagram, Linkedin,
+  BarChart3, Database, Brain, Cloud
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -45,6 +46,38 @@ const WORKFLOW_TYPES = [
     iconBg: 'bg-emerald-600',
     description: 'AI writes blog + featured image → approval → GitHub PR created',
   },
+  {
+    key: 'cur-forwarder',
+    label: 'CUR Forwarder',
+    icon: BarChart3,
+    color: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    iconBg: 'bg-indigo-600',
+    description: 'AWS Cost & Usage Report → deduplicate → push to New Relic',
+  },
+  {
+    key: 'postgres-forwarder',
+    label: 'Postgres Forwarder',
+    icon: Database,
+    color: 'bg-teal-50 text-teal-700 border-teal-200',
+    iconBg: 'bg-teal-600',
+    description: 'Collect pg_stat_* metrics → ship to New Relic',
+  },
+  {
+    key: 'ai-sync',
+    label: 'AI Data Sync',
+    icon: Brain,
+    color: 'bg-violet-50 text-violet-700 border-violet-200',
+    iconBg: 'bg-violet-600',
+    description: 'Sync whitelisted Supabase data → Neon Postgres',
+  },
+  {
+    key: 's3-cleanup',
+    label: 'S3 Cleanup',
+    icon: Cloud,
+    color: 'bg-orange-50 text-orange-700 border-orange-200',
+    iconBg: 'bg-orange-600',
+    description: 'Enforce S3 retention policies → delete old files',
+  },
 ]
 
 const INDUSTRIES = ['Manufacturing','Retail','Healthcare','Logistics','Construction','Education','Hospitality','Technology','Agriculture','Finance']
@@ -75,6 +108,11 @@ function defaultParams(workflowType) {
       return { repo_name: '', prompt: '', platforms: { linkedin: true, facebook: false, instagram: false } }
     case 'blog':
       return { topic: BLOG_TOPICS[0], custom_topic: '', keywords: '', word_count: 800, custom_prompt: '', use_custom_topic: false }
+    case 'cur-forwarder':
+    case 'postgres-forwarder':
+    case 'ai-sync':
+    case 's3-cleanup':
+      return {} // No parameters needed - these are simple trigger workflows
     default:
       return {}
   }

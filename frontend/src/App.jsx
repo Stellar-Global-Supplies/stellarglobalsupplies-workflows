@@ -14,6 +14,7 @@ import WorkflowRuns   from './pages/WorkflowRuns'
 import History        from './pages/History'
 import Schedules      from './pages/Schedules'
 import PaymentFollowup from './pages/PaymentFollowup'
+import TechJobs        from './pages/TechJobs'
 
 function Guard({ children }) {
   const { user, loading } = useAuth()
@@ -83,6 +84,7 @@ export default function App() {
               <Route path="history"   element={<History />} />
               <Route path="schedules"        element={<Schedules />} />
               <Route path="payment-followup" element={<PaymentFollowup />} />
+              <Route path="tech-jobs"        element={<TechJobs />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

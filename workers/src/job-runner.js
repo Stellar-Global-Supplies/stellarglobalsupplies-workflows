@@ -49,6 +49,12 @@ import {
   leadGenApprovalGate,
   leadGenSendEmail,
 } from './steps/lead-gen.js'
+import {
+  curRunForwarder,
+  pgRunForwarder,
+  aiSyncRun,
+  s3CleanupRun,
+} from './steps/tech-jobs.js'
 
 export default {
   async scheduled(event, env, ctx) {
@@ -319,4 +325,10 @@ const STEP_HANDLERS = {
   payment_bedrock_draft_email: (ctx) => paymentBedrockDraftEmail(ctx),
   payment_approval_gate:       (ctx) => paymentApprovalGate(ctx),
   payment_send_email:          (ctx) => paymentSendEmail(ctx),
+
+  // ── Tech Jobs (forwarders) ──────────────────────────────────── LIVE ✓ ──
+  cur_run_forwarder:           (ctx) => curRunForwarder(ctx),
+  pg_run_forwarder:            (ctx) => pgRunForwarder(ctx),
+  ai_sync_run:                 (ctx) => aiSyncRun(ctx),
+  s3_cleanup_run:              (ctx) => s3CleanupRun(ctx),
 }

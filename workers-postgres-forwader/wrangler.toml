@@ -1,0 +1,39 @@
+name               = "postgres-forwarder"
+main               = "index.js"
+compatibility_date = "2025-04-01"
+
+# Enable Node.js compat for the `pg` driver
+node_compat = true
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
+# ── Shared KV namespace for dedup state ───────────────────────────────────
+# Holds two keys: "supabase-state" and "neon-state" — independent per source.
+# Create with: wrangler kv:namespace create PG_STATE_KV
+[[kv_namespaces]]
+binding    = "PG_STATE_KV"
+id         = "d543e8efd0a34c97acd58b189849724b"
+preview_id = "d543e8efd0a34c97acd58b189849724b"
+
+# ── Secrets (via Cloudflare Secrets Store — same pattern as other workers) ─
+[[secrets_store_secrets]]
+binding     = "NEW_RELIC_LICENSE_KEY"
+secret_name = "NEW_RELIC_LICENSE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_URL"
+secret_name = "SUPABASE_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_SERVICE_KEY"
+secret_name = "SUPABASE_SERVICE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "ADMIN_NEON_DB_URL"
+secret_name = "ADMIN_NEON_DB_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"

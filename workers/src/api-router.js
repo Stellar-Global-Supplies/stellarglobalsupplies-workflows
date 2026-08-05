@@ -92,6 +92,7 @@ export default {
 const VALID_WORKFLOW_TYPES = [
   'lead-generation', 'lead-email-existing', 'social-product',
   'social-tech', 'blog', 'payment-followup',
+  'cur-forwarder', 'postgres-forwarder', 'ai-sync', 's3-cleanup',
 ]
 
 const FIRST_STEP = {
@@ -101,6 +102,10 @@ const FIRST_STEP = {
   'social-tech':        'social_get_tech_context',
   'blog':               'blog_generate_outline',
   'payment-followup':   'payment_fetch_overdue',
+  'cur-forwarder':      'cur_run_forwarder',
+  'postgres-forwarder': 'pg_run_forwarder',
+  'ai-sync':            'ai_sync_run',
+  's3-cleanup':         's3_cleanup_run',
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -641,6 +646,18 @@ function validateWorkflowInput(wfType, body) {
       break
     case 'payment-followup':
       // No required fields - uses default parameters
+      break
+    case 'cur-forwarder':
+      // No required fields — triggers CUR forwarder on demand
+      break
+    case 'postgres-forwarder':
+      // No required fields — triggers Postgres forwarder on demand
+      break
+    case 'ai-sync':
+      // No required fields — triggers AI data sync to Neon on demand
+      break
+    case 's3-cleanup':
+      // No required fields — triggers S3 lifecycle cleanup on demand
       break
   }
   return null

@@ -36,6 +36,9 @@ wrangler d1 create stellar-workflows
 # From project root
 cd workers
 wrangler d1 execute stellar-workflows --file=../d1/schema.sql
+
+# Seed initial tech job schedules
+wrangler d1 execute stellar-workflows --file=../d1/seed-tech-job-schedules.sql
 ```
 
 **Verify Tables Created:**
