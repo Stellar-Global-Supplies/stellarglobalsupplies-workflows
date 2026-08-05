@@ -102,7 +102,7 @@ INSERT OR IGNORE INTO workflow_schedules (
   's3-cleanup',
   'S3 Cleanup - Daily at 2 AM',
   'daily',
-  '07:30',  -- 2 AM UTC = 7:30 AM IST
+  '07:30',  
   '0 2 * * *',
   1,
   '{}',

@@ -3,8 +3,7 @@ main               = "index.js"
 compatibility_date = "2025-04-01"
 
 # Enable Node.js compat for the `pg` driver
-[compatibility_flags]
-nodejs_compat = true
+compatibility_flags = ["nodejs_compat"]
 
 [observability.logs]
 enabled         = true

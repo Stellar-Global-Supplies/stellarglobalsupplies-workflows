@@ -3,8 +3,7 @@ main               = "index.js"
 compatibility_date = "2025-04-01"
 
 # Enable Node.js compat (for any Node built-ins if needed)
-[compatibility_flags]
-nodejs_compat = true
+compatibility_flags = ["nodejs_compat"]
 
 [observability.logs]
 enabled         = true
