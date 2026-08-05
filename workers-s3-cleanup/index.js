@@ -60,7 +60,7 @@ async function runCleanup(env) {
   const start = Date.now();
   log.info(`=== S3 Cleanup Starting  run_id=${runId} ===`);
 
-  const nrKey = env.NEW_RELIC_LICENSE_KEY;
+  const nrKey = await resolveSecret(env.NEW_RELIC_LICENSE_KEY);
   if (!nrKey) {
     log.error("NEW_RELIC_LICENSE_KEY is not set. Aborting.");
     return { ok: false, error: "missing NEW_RELIC_LICENSE_KEY" };

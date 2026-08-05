@@ -127,7 +127,7 @@ async function runForwarder(env, target = "all") {
   const start = Date.now();
   log.info(`=== Postgres → New Relic  target=${target}  run_at=${runTs} ===`);
 
-  const nrKey = env.NEW_RELIC_LICENSE_KEY;
+  const nrKey = await resolveSecret(env.NEW_RELIC_LICENSE_KEY);
   if (!nrKey) {
     log.error("NEW_RELIC_LICENSE_KEY is not set. Aborting.");
     return { statusCode: 1, error: "missing NEW_RELIC_LICENSE_KEY" };
@@ -249,7 +249,7 @@ async function buildSources(env, target, log) {
       serviceName: "neon-monitor",      // NR service.name attribute
       connectionString: env.NEON_DB
         ? env.NEON_DB.connectionString
-        : env.ADMIN_NEON_DB_URL,
+        : await resolveSecret(env.ADMIN_NEON_DB_URL),
     },
   ];
 

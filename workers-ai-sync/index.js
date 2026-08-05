@@ -254,7 +254,7 @@ async function runSync(env) {
 
   try {
     const neonConn = new Client({
-      connectionString: env.ADMIN_NEON_DB_URL,
+      connectionString: await resolveSecret(env.ADMIN_NEON_DB_URL),
       connectionTimeoutMillis: 10_000,
       statement_timeout:       120_000,
       query_timeout:           120_000,

@@ -4,7 +4,7 @@ import { startWorkflow } from '../services/api'
 import { PageHeader } from '../components/ui'
 import WorkflowProgress, { TECH_JOB_STEPS } from '../components/WorkflowProgress'
 import {
-  Activity, Play, Database, BarChart3, Cloud, RefreshCw, Brain,
+  Activity, Play, Database, BarChart3, Cloud, RefreshCw, Brain, Trash2,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -42,6 +42,23 @@ const JOBS = [
       'Ships to New Relic with per-source service.name tags',
     ],
     secrets: ['NEW_RELIC_LICENSE_KEY', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'ADMIN_NEON_DB_URL'],
+  },
+  {
+    key:        's3-cleanup',
+    title:      'S3 Cleanup',
+    icon:       Trash2,
+    color:      'bg-orange-50 text-orange-700 border-orange-200',
+    iconBg:     'bg-orange-600',
+    schedule:   'Daily at 02:00 UTC (cron)',
+    description:
+      'Enforces per-bucket object-age retention policies across all Stellar S3 buckets and ships structured cleanup logs to New Relic EU.',
+    whatItDoes: [
+      'Scans 7 S3 bucket/prefix policies for expired objects',
+      'Skips blog-images/ and other excluded prefixes',
+      'Batch-deletes expired objects (up to 1000 per request)',
+      'Ships per-bucket cleanup events to New Relic Log API',
+    ],
+    secrets: ['BEDROCK_ACCESS_KEY_ID', 'BEDROCK_SECRET_ACCESS_KEY', 'BEDROCK_REGION', 'NEW_RELIC_LICENSE_KEY'],
   },
   {
     key:        'ai-sync',
@@ -191,9 +208,10 @@ export default function TechJobs() {
         <div className="text-xs text-blue-700 leading-relaxed">
           <p className="font-medium mb-1">Automated runs still happen via cron</p>
           <p>
-            Both workers keep their own Cloudflare Cron schedules
-            (<code className="bg-white/60 px-1 rounded">0 */8 * * *</code> for CUR,
-            <code className="bg-white/60 px-1 rounded">0 * * * *</code> for Postgres).
+            All workers keep their own Cloudflare Cron schedules —
+            <code className="bg-white/60 px-1 rounded">0 */8 * * *</code> for CUR,
+            <code className="bg-white/60 px-1 rounded">0 * * * *</code> for Postgres &amp; AI Sync,
+            <code className="bg-white/60 px-1 rounded">0 2 * * *</code> for S3 Cleanup.
             This page is for on-demand runs with live workflow progress.
           </p>
         </div>
