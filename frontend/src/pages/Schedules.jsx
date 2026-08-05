@@ -78,6 +78,14 @@ const WORKFLOW_TYPES = [
     iconBg: 'bg-orange-600',
     description: 'Enforce S3 retention policies → delete old files',
   },
+  {
+    key: 'brevo-sync',
+    label: 'Brevo Contact Sync',
+    icon: Mail,
+    color: 'bg-sky-50 text-sky-700 border-sky-200',
+    iconBg: 'bg-sky-600',
+    description: 'Sync Supabase contacts to NeonDB + Brevo lists',
+  },
 ]
 
 const INDUSTRIES = ['Manufacturing','Retail','Healthcare','Logistics','Construction','Education','Hospitality','Technology','Agriculture','Finance']
@@ -112,6 +120,7 @@ function defaultParams(workflowType) {
     case 'postgres-forwarder':
     case 'ai-sync':
     case 's3-cleanup':
+    case 'brevo-sync':
       return {} // No parameters needed - these are simple trigger workflows
     default:
       return {}
