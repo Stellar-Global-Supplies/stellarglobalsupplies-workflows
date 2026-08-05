@@ -71,7 +71,7 @@ async function buildSupabaseConnectionString(env) {
   const ref = url.replace(/^https?:\/\//, '').split('.')[0]
   if (!ref) return null
 
-  return `postgresql://postgres.${ref}:${encodeURIComponent(key)}@${ref}.pooler.supabase.com:5432/postgres`
+  return `postgresql://postgres.${ref}:${encodeURIComponent(key)}@pooler.${ref}.supabase.com:6543/postgres`
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
