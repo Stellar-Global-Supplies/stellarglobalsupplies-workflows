@@ -25,13 +25,8 @@ secret_name = "NEW_RELIC_LICENSE_KEY"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
 [[secrets_store_secrets]]
-binding     = "SUPABASE_URL"
-secret_name = "SUPABASE_URL"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[[secrets_store_secrets]]
-binding     = "SUPABASE_SERVICE_KEY"
-secret_name = "SUPABASE_SERVICE_KEY"
+binding     = "SUPABASE_DB_URL"
+secret_name = "SUPABASE_DB_URL"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
 [[secrets_store_secrets]]

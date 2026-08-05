@@ -6,7 +6,7 @@ import {
   CalendarClock, Plus, Pencil, Trash2, Power, PowerOff,
   Users, Share2, Code2, FileText, ChevronDown, ChevronUp,
   Clock, Calendar, Facebook, Instagram, Linkedin,
-  BarChart3, Database, Brain, Cloud
+  BarChart3, Database, Brain, Cloud, Mail
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'

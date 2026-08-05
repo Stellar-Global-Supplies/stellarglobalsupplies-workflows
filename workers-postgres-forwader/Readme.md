@@ -204,18 +204,15 @@ npm install
 wrangler kv:namespace create PG_STATE_KV
 # Copy the returned id into wrangler.toml → kv_namespaces[].id
 
-# 2. Configure Postgres connections — Option A (Hyperdrive) or B (secrets)
+# 2. Configure Postgres connections — direct connection strings via secrets
 
-# Option A — Hyperdrive (recommended):
-wrangler hyperdrive create supabase-db \
-  --connection-string="postgresql://postgres:[PASS]@db.[REF].supabase.co:5432/postgres"
+# Supabase — direct Postgres connection string (pooler, port 6543):
+#   postgresql://postgres.<ref>:<password>@pooler.<ref>.supabase.com:6543/postgres
+# URL-encode the password if it contains special characters.
+wrangler secret put SUPABASE_DB_URL
 
-wrangler hyperdrive create neon-db \
-  --connection-string="postgresql://[USER]:[PASS]@[HOST].neon.tech/[DBNAME]?sslmode=require"
-# Copy the returned IDs into wrangler.toml and uncomment the [[hyperdrive]] blocks
-
-# Option B — Direct secrets:
-# Supabase connection auto-built from SUPABASE_URL + SUPABASE_SERVICE_KEY (already configured)
+# Neon — direct Postgres connection string (SSL required):
+#   postgresql://[USER]:[PASS]@[HOST].neon.tech/[DBNAME]?sslmode=require
 wrangler secret put ADMIN_NEON_DB_URL
 
 # 3. Set the New Relic secret

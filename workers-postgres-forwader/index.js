@@ -20,32 +20,23 @@
  *
  * ── Postgres connection options (per database) ─────────────────────────────
  *
- *   Supabase — connection string is built automatically from SUPABASE_URL +
- *   SUPABASE_SERVICE_KEY (already in Secrets Store) — no separate
- *   SUPABASE_DB_URL secret needed.
+ *   Supabase — direct connection string via secret:
+ *     wrangler secret put SUPABASE_DB_URL
+ *     Format: postgresql://postgres.<ref>:<password>@pooler.<ref>.supabase.com:6543/postgres
+ *     (URL-encode the password if it contains special characters.)
  *
- *   Neon — Cloudflare Hyperdrive (recommended):
- *     Creates a pooled connection; lowest latency for cron workers.
- *     wrangler hyperdrive create neon-db --connection-string="postgres://..."
- *     Then set bindings in wrangler.toml.
- *   OR — Direct connection string via secret:
+ *   Neon — direct connection string via secret:
  *     wrangler secret put ADMIN_NEON_DB_URL
- *     No extra bindings needed.
+ *     Format: postgresql://[USER]:[PASS]@[HOST].neon.tech/[DBNAME]?sslmode=require
  *
  * ── Required bindings (wrangler.toml) ─────────────────────────────────────
  *   [[kv_namespaces]]
  *   binding = "PG_STATE_KV"          # shared KV — state keyed per source
  *
- *   # Option A (Neon):
- *   [[hyperdrive]]
- *   binding = "NEON_DB"
- *   id      = "<HYPERDRIVE_CONFIG_ID>"
- *
  * ── Required secrets ───────────────────────────────────────────────────────
  *   NEW_RELIC_LICENSE_KEY   (always required)
- *   SUPABASE_URL            (Supabase — project URL)
- *   SUPABASE_SERVICE_KEY    (Supabase — service role key, used as DB password)
- *   ADMIN_NEON_DB_URL       (Neon — connection string)
+ *   SUPABASE_DB_URL         (Supabase — direct Postgres connection string)
+ *   ADMIN_NEON_DB_URL       (Neon — direct Postgres connection string)
  */
 
 import { Client } from "pg";
@@ -56,22 +47,6 @@ async function resolveSecret(val) {
   if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
   if (typeof val === 'string') return val
   return String(val)
-}
-
-/**
- * Build a Supabase Postgres connection string from SUPABASE_URL + SUPABASE_SERVICE_KEY.
- * Supabase URL format: https://<project-ref>.supabase.co
- * Connection string:   postgresql://postgres.<ref>:<service-key>@<ref>.pooler.supabase.com:5432/postgres
- */
-async function buildSupabaseConnectionString(env) {
-  const url = await resolveSecret(env.SUPABASE_URL)
-  const key = await resolveSecret(env.SUPABASE_SERVICE_KEY)
-  if (!url || !key) return null
-
-  const ref = url.replace(/^https?:\/\//, '').split('.')[0]
-  if (!ref) return null
-
-  return `postgresql://postgres.${ref}:${encodeURIComponent(key)}@pooler.${ref}.supabase.com:6543/postgres`
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -229,27 +204,20 @@ async function runForwarder(env, target = "all") {
  * NR service.name tag, and its own KV state key.
  */
 async function buildSources(env, target, log) {
-  // Build Supabase connection string from existing secrets (async)
-  const supabaseConn = env.SUPABASE_DB
-    ? env.SUPABASE_DB.connectionString
-    : await buildSupabaseConnectionString(env)
-
   const all = [
     {
       name:        "supabase",
       kvKey:       KV_KEY_SUPABASE,
       namespace:   "supabase",          // metric name prefix  e.g. supabase.db.size_bytes
       serviceName: "supabase-monitor",  // NR service.name attribute
-      connectionString: supabaseConn,
+      connectionString: await resolveSecret(env.SUPABASE_DB_URL),
     },
     {
       name:        "neon",
       kvKey:       KV_KEY_NEON,
       namespace:   "neon",              // metric name prefix  e.g. neon.db.size_bytes
       serviceName: "neon-monitor",      // NR service.name attribute
-      connectionString: env.NEON_DB
-        ? env.NEON_DB.connectionString
-        : await resolveSecret(env.ADMIN_NEON_DB_URL),
+      connectionString: await resolveSecret(env.ADMIN_NEON_DB_URL),
     },
   ];
 
@@ -261,7 +229,7 @@ async function buildSources(env, target, log) {
     if (!src.connectionString) {
       log.warn(
         `${src.name}: no connection string found ` +
-        `(set SUPABASE_URL + SUPABASE_SERVICE_KEY, or ADMIN_NEON_DB_URL / NEON_DB Hyperdrive) — skipping`
+        `(set SUPABASE_DB_URL or ADMIN_NEON_DB_URL) — skipping`
       );
       return false;
     }
