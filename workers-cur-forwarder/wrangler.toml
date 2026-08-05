@@ -1,35 +1,41 @@
 name               = "cur-forwarder"
 main               = "index.js"
 compatibility_date = "2025-04-01"
-workers_dev        = true
+
+# Ensure the worker is reachable on its .workers.dev subdomain
+workers_dev = true
 
 [observability.logs]
 enabled         = true
 invocation_logs = true
 
+[triggers]
+crons = ["0 */8 * * *"]   # every 8 hours
+
 # ── Worker variables ───────────────────────────────────────────────────────
 [vars]
-NEW_RELIC_REGION = "eu"   # change to "us" if your NR account is in US
+NEW_RELIC_REGION = "eu"                           # change to "us" if your NR account is in US
+AWS_REGION       = "us-east-1"
+RAW_CUR_BUCKET   = "stellarglobal-costing-bucket"
 
-# ── KV namespace for dedup state (replaces cur-state.json on state branch) ─
-# Create with: wrangler kv:namespace create CUR_STATE_KV
+# ── KV namespace for dedup state ──────────────────────────────────────────
 [[kv_namespaces]]
 binding    = "CUR_STATE_KV"
 id         = "c7291739eeb24194b543097ffe9b09a6"
 preview_id = "c7291739eeb24194b543097ffe9b09a6"
 
-# ── Secrets (via Cloudflare Secrets Store — same pattern as other workers) ─
+# ── Secrets (via Cloudflare Secrets Store) ────────────────────────────────
 [[secrets_store_secrets]]
 binding     = "NEW_RELIC_LICENSE_KEY"
 secret_name = "NEW_RELIC_LICENSE_KEY"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
 [[secrets_store_secrets]]
-binding     = "SUPABASE_URL"
-secret_name = "SUPABASE_URL"
+binding     = "BEDROCK_ACCESS_KEY_ID"
+secret_name = "BEDROCK_ACCESS_KEY_ID"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
 [[secrets_store_secrets]]
-binding     = "SUPABASE_SERVICE_KEY"
-secret_name = "SUPABASE_SERVICE_KEY"
+binding     = "BEDROCK_SECRET_ACCESS_KEY"
+secret_name = "BEDROCK_SECRET_ACCESS_KEY"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
