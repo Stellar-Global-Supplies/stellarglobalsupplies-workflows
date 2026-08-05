@@ -602,7 +602,7 @@ function dateToTsMs(dateStr) {
 function newRelicMetricsUrl(region) {
   return region.toLowerCase() === "eu"
     ? "https://metric-api.eu.newrelic.com/metric/v1"
-    : "https://metric-api.newrelic.com/metric/v1";
+    : "https://api.newrelic.com/metric/v1";
 }
 
 function makeLogger(name) {

@@ -1,6 +1,7 @@
 name               = "s3-cleanup"
 main               = "index.js"
 compatibility_date = "2025-04-01"
+workers_dev        = true
 
 # Enable Node.js compat (for any Node built-ins if needed)
 compatibility_flags = ["nodejs_compat"]

@@ -1,6 +1,7 @@
 name               = "ai-sync"
 main               = "index.js"
 compatibility_date = "2025-04-01"
+workers_dev        = true
 
 # Enable Node.js compat for the `pg` driver
 compatibility_flags = ["nodejs_compat"]

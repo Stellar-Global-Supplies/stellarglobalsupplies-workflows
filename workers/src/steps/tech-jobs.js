@@ -29,7 +29,14 @@ async function resolveSecret(val) {
 async function triggerForwarder(env, urlVarName, label, logPrefix) {
   const url = await resolveSecret(env[urlVarName])
   if (!url) {
-    throw new Error(`${urlVarName} is not configured on workers-job-runner`)
+    const msg = `${urlVarName} is not configured on workers-job-runner`
+    console.warn(`[${logPrefix}] WARNING: ${msg}`)
+    return { 
+      ok: false, 
+      message: msg, 
+      skipped: true,
+      reason: 'URL not configured'
+    }
   }
 
   const base = url.replace(/\/$/, '')
@@ -37,21 +44,40 @@ async function triggerForwarder(env, urlVarName, label, logPrefix) {
 
   console.log(`[${logPrefix}] triggering ${runUrl}`)
 
-  const res = await fetch(runUrl, {
-    method:  'GET',
-    headers: { Accept: 'application/json' },
-    signal:  AbortSignal.timeout(25_000),
-  })
+  try {
+    const res = await fetch(runUrl, {
+      method:  'GET',
+      headers: { Accept: 'application/json' },
+      signal:  AbortSignal.timeout(25_000),
+    })
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`${label} forwarder returned HTTP ${res.status}: ${body.slice(0, 200)}`)
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      const msg = `${label} forwarder returned HTTP ${res.status}: ${body.slice(0, 200)}`
+      console.warn(`[${logPrefix}] WARNING: ${msg}`)
+      return { 
+        ok: false, 
+        message: msg, 
+        skipped: true,
+        reason: `HTTP ${res.status}`,
+        statusCode: res.status
+      }
+    }
+
+    const data = await res.json().catch(() => null)
+    console.log(`[${logPrefix}] triggered: ${JSON.stringify(data)}`)
+
+    return { ok: true, message: `${label} forwarder started`, response: data }
+  } catch (error) {
+    const msg = `${label} forwarder failed: ${error.message}`
+    console.warn(`[${logPrefix}] WARNING: ${msg}`)
+    return { 
+      ok: false, 
+      message: msg, 
+      skipped: true,
+      reason: error.message
+    }
   }
-
-  const data = await res.json().catch(() => null)
-  console.log(`[${logPrefix}] triggered: ${JSON.stringify(data)}`)
-
-  return { ok: true, message: `${label} forwarder started`, response: data }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

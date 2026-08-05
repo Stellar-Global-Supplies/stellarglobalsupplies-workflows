@@ -241,20 +241,10 @@ wrangler secret put WEBSITE_BLOG_DIR
 
 ### 4. Deploy Workers
 
+**Important: Deploy in this specific order:**
+
 ```bash
-# Deploy main worker
-cd workers
-wrangler deploy
-
-# Deploy schedule runner
-cd workers-schedule-runner
-wrangler deploy
-
-# Deploy job runner
-cd workers-job-runner
-wrangler deploy
-
-# Deploy forwarders
+# 1. Deploy forwarders FIRST (they need to be accessible before job-runner triggers them)
 cd workers-cur-forwarder
 wrangler deploy
 
@@ -265,6 +255,18 @@ cd workers-ai-sync
 wrangler deploy
 
 cd workers-s3-cleanup
+wrangler deploy
+
+# 2. Deploy main workers
+cd workers
+wrangler deploy
+
+# 3. Deploy schedule runner
+cd workers-schedule-runner
+wrangler deploy
+
+# 4. Deploy job runner LAST (it triggers the forwarders)
+cd workers-job-runner
 wrangler deploy
 ```
 
@@ -491,6 +493,37 @@ curl https://stellar-workflows-api.YOUR_SUBDOMAIN.workers.dev/debug-env
 - Check page IDs are correct
 - Verify access tokens haven't expired
 - Check `post_results` in `social_posts` table
+
+### Tech Job Forwarder Errors (cur_run_forwarder, postgres_forwarder, etc.)
+
+**Error:** `step cur_run_forwarder failed` or similar forwarder errors
+
+**Solution:**
+1. **Deploy forwarders FIRST** before deploying job-runner:
+   ```bash
+   cd workers-cur-forwarder && wrangler deploy
+   cd workers-postgres-forwader && wrangler deploy
+   cd workers-ai-sync && wrangler deploy
+   cd workers-s3-cleanup && wrangler deploy
+   ```
+
+2. **Verify forwarder URLs are accessible:**
+   ```bash
+   curl https://cur-forwarder.workwithprasadbhavsar.workers.dev
+   curl https://postgres-forwarder.workwithprasadbhavsar.workers.dev
+   curl https://ai-sync.workwithprasadbhavsar.workers.dev
+   curl https://s3-cleanup.workwithprasadbhavsar.workers.dev
+   ```
+
+3. **Check forwarder worker logs:**
+   ```bash
+   cd workers-cur-forwarder && wrangler tail
+   cd workers-postgres-forwader && wrangler tail
+   ```
+
+4. **Verify URLs in job-runner config:**
+   - Check `workers-job-runner/wrangler.toml` has correct `[vars]` section
+   - URLs should match your deployed forwarder subdomains
 
 ### Blog PRs Not Creating
 

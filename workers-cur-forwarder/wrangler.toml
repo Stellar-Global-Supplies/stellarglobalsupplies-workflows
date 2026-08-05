@@ -1,6 +1,7 @@
 name               = "cur-forwarder"
 main               = "index.js"
 compatibility_date = "2025-04-01"
+workers_dev        = true
 
 [observability.logs]
 enabled         = true

@@ -132,6 +132,24 @@ VITE_POLL_INTERVAL=2000
 
 ## 🚀 Step 3: Deploy Workers
 
+### 3.0 Deploy Forwarders FIRST (Critical!)
+
+**⚠️ IMPORTANT:** Forwarder workers MUST be deployed before the job-runner, otherwise you'll get HTTP 404 errors.
+
+```bash
+# Deploy in this order:
+cd workers-cur-forwarder && wrangler deploy
+cd workers-postgres-forwader && wrangler deploy
+cd workers-ai-sync && wrangler deploy
+cd workers-s3-cleanup && wrangler deploy
+
+# Verify each forwarder is accessible:
+curl https://cur-forwarder.workwithprasadbhavsar.workers.dev
+curl https://postgres-forwarder.workwithprasadbhavsar.workers.dev
+curl https://ai-sync.workwithprasadbhavsar.workers.dev
+curl https://s3-cleanup.workwithprasadbhavsar.workers.dev
+```
+
 ### 3.1 Deploy stellar-job-runner
 
 This is the main worker that executes workflow steps.
