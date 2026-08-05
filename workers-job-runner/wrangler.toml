@@ -9,12 +9,23 @@ invocation_logs = true
 [triggers]
 crons = ["* * * * *"]
 
-# ── Forwarder URLs — used by Tech Jobs workflow steps to trigger remote workers ──
-[vars]
-CUR_FORWARDER_URL      = "https://cur-forwarder.workwithprasadbhavsar.workers.dev"
-POSTGRES_FORWARDER_URL = "https://postgres-forwarder.workwithprasadbhavsar.workers.dev"
-AI_SYNC_URL            = "https://ai-sync.workwithprasadbhavsar.workers.dev"
-S3_CLEANUP_URL         = "https://s3-cleanup.workwithprasadbhavsar.workers.dev"
+# ── Service Bindings — direct worker-to-worker calls (no HTTP, no DNS, no 1042 errors) ──
+# These replace the old CUR_FORWARDER_URL / POSTGRES_FORWARDER_URL / AI_SYNC_URL vars.
+[[services]]
+binding  = "SVC_CUR_FORWARDER"
+service  = "cur-forwarder"
+
+[[services]]
+binding  = "SVC_POSTGRES_FORWARDER"
+service  = "postgres-forwarder"
+
+[[services]]
+binding  = "SVC_AI_SYNC"
+service  = "ai-sync"
+
+[[services]]
+binding  = "SVC_S3_CLEANUP"
+service  = "s3-cleanup"
 
 # Workers AI binding — FLUX image generation
 [ai]
@@ -139,5 +150,3 @@ store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 binding     = "IG_ACCESS_TOKEN"
 secret_name = "IG_ACCESS_TOKEN"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-

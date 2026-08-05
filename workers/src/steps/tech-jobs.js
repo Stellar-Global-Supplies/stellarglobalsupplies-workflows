@@ -1,83 +1,44 @@
 /**
  * Tech Jobs — Step Handlers
  *
- * Trigger remote Cloudflare Workers (forwarders) via HTTP for on-demand runs.
- * Each forwarder has its own cron schedule for automated runs — this handler
- * enables manual triggering from the Tech Jobs page.
+ * Trigger forwarder Workers via Cloudflare Service Bindings (direct worker-to-worker,
+ * no HTTP, no DNS, no workers.dev — eliminates the 1042 "worker not found" error).
  *
  * Steps:
- *   cur_run_forwarder     → calls CUR forwarder /run endpoint
- *   pg_run_forwarder      → calls Postgres forwarder /run endpoint
- *   ai_sync_run           → calls AI Sync worker /run endpoint
- *   s3_cleanup_run        → calls S3 Cleanup worker /run endpoint
+ *   cur_run_forwarder     → env.SVC_CUR_FORWARDER.fetch('http://x/run')
+ *   pg_run_forwarder      → env.SVC_POSTGRES_FORWARDER.fetch('http://x/run')
+ *   ai_sync_run           → env.SVC_AI_SYNC.fetch('http://x/run')
+ *   s3_cleanup_run        → env.SVC_S3_CLEANUP.fetch('http://x/run')
  *
- * Required vars on workers-job-runner:
- *   CUR_FORWARDER_URL       e.g. https://cur-forwarder.<subdomain>.workers.dev
- *   POSTGRES_FORWARDER_URL  e.g. https://postgres-forwarder.<subdomain>.workers.dev
- *   AI_SYNC_URL             e.g. https://ai-sync.<subdomain>.workers.dev
- *   S3_CLEANUP_URL          e.g. https://s3-cleanup.<subdomain>.workers.dev
+ * Required service bindings on workers-job-runner (wrangler.toml [[services]]):
+ *   SVC_CUR_FORWARDER       → service = "cur-forwarder"
+ *   SVC_POSTGRES_FORWARDER  → service = "postgres-forwarder"
+ *   SVC_AI_SYNC             → service = "ai-sync"
+ *   SVC_S3_CLEANUP          → service = "s3-cleanup"
  */
 
-// Helper to resolve Cloudflare secrets (handles both string and secret objects)
-async function resolveSecret(val) {
-  if (!val) return undefined
-  if (typeof val === 'object' && typeof val.get === 'function') return await val.get()
-  if (typeof val === 'string') return val
-  return String(val)
-}
-
-async function triggerForwarder(env, urlVarName, label, logPrefix) {
-  const url = await resolveSecret(env[urlVarName])
-  if (!url) {
-    const msg = `${urlVarName} is not configured on workers-job-runner`
-    console.warn(`[${logPrefix}] WARNING: ${msg}`)
-    return { 
-      ok: false, 
-      message: msg, 
-      skipped: true,
-      reason: 'URL not configured'
-    }
+async function triggerForwarder(svcBinding, label, logPrefix) {
+  if (!svcBinding) {
+    throw new Error(`Service binding for ${label} is not configured on workers-job-runner`)
   }
 
-  const base = url.replace(/\/$/, '')
-  const runUrl = `${base}/run`
+  console.log(`[${logPrefix}] triggering ${label} via service binding`)
 
-  console.log(`[${logPrefix}] triggering ${runUrl}`)
+  // Service bindings require a valid URL — the hostname is ignored, only the path matters
+  const res = await svcBinding.fetch('http://worker/run', {
+    method:  'GET',
+    headers: { Accept: 'application/json' },
+  })
 
-  try {
-    const res = await fetch(runUrl, {
-      method:  'GET',
-      headers: { Accept: 'application/json' },
-      signal:  AbortSignal.timeout(25_000),
-    })
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      const msg = `${label} forwarder returned HTTP ${res.status}: ${body.slice(0, 200)}`
-      console.warn(`[${logPrefix}] WARNING: ${msg}`)
-      return { 
-        ok: false, 
-        message: msg, 
-        skipped: true,
-        reason: `HTTP ${res.status}`,
-        statusCode: res.status
-      }
-    }
-
-    const data = await res.json().catch(() => null)
-    console.log(`[${logPrefix}] triggered: ${JSON.stringify(data)}`)
-
-    return { ok: true, message: `${label} forwarder started`, response: data }
-  } catch (error) {
-    const msg = `${label} forwarder failed: ${error.message}`
-    console.warn(`[${logPrefix}] WARNING: ${msg}`)
-    return { 
-      ok: false, 
-      message: msg, 
-      skipped: true,
-      reason: error.message
-    }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`${label} forwarder returned HTTP ${res.status}: ${body.slice(0, 200)}`)
   }
+
+  const data = await res.json().catch(() => null)
+  console.log(`[${logPrefix}] triggered: ${JSON.stringify(data)}`)
+
+  return { ok: true, message: `${label} forwarder started`, response: data }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -87,7 +48,7 @@ async function triggerForwarder(env, urlVarName, label, logPrefix) {
 
 export async function curRunForwarder(ctx) {
   const { env } = ctx
-  const result = await triggerForwarder(env, 'CUR_FORWARDER_URL', 'CUR', 'cur_run_forwarder')
+  const result = await triggerForwarder(env.SVC_CUR_FORWARDER, 'CUR', 'cur_run_forwarder')
 
   if (ctx.workflow_run_id) {
     await ctx.d1.update('workflow_runs', {
@@ -104,7 +65,7 @@ export async function curRunForwarder(ctx) {
 
 export async function pgRunForwarder(ctx) {
   const { env } = ctx
-  const result = await triggerForwarder(env, 'POSTGRES_FORWARDER_URL', 'Postgres', 'pg_run_forwarder')
+  const result = await triggerForwarder(env.SVC_POSTGRES_FORWARDER, 'Postgres', 'pg_run_forwarder')
 
   if (ctx.workflow_run_id) {
     await ctx.d1.update('workflow_runs', {
@@ -120,7 +81,7 @@ export async function pgRunForwarder(ctx) {
 
 export async function aiSyncRun(ctx) {
   const { env } = ctx
-  const result = await triggerForwarder(env, 'AI_SYNC_URL', 'AI Sync', 'ai_sync_run')
+  const result = await triggerForwarder(env.SVC_AI_SYNC, 'AI Sync', 'ai_sync_run')
 
   if (ctx.workflow_run_id) {
     await ctx.d1.update('workflow_runs', {
@@ -136,7 +97,7 @@ export async function aiSyncRun(ctx) {
 
 export async function s3CleanupRun(ctx) {
   const { env } = ctx
-  const result = await triggerForwarder(env, 'S3_CLEANUP_URL', 'S3 Cleanup', 's3_cleanup_run')
+  const result = await triggerForwarder(env.SVC_S3_CLEANUP, 'S3 Cleanup', 's3_cleanup_run')
 
   if (ctx.workflow_run_id) {
     await ctx.d1.update('workflow_runs', {
