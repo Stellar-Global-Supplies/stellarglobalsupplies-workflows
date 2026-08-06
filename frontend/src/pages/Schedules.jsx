@@ -88,15 +88,6 @@ const WORKFLOW_TYPES = [
   },
 ]
 
-const INDUSTRIES = ['Manufacturing','Retail','Healthcare','Logistics','Construction','Education','Hospitality','Technology','Agriculture','Finance']
-const COUNTRIES  = ['India','United States','United Kingdom','Germany','UAE','Singapore','Australia','Canada','South Africa','Brazil']
-const BLOG_TOPICS = [
-  'B2B Procurement Best Practices',
-  'Supply Chain Optimisation Tips',
-  'How to Choose the Right Industrial Supplier',
-  'Office Supplies Buying Guide for Businesses',
-  'Sustainable Procurement for Modern Companies',
-]
 const DAYS_OF_WEEK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 const PLATFORMS_META = [
   { key: 'facebook',  label: 'Facebook',  Icon: Facebook,  color: 'text-[#1877F2]' },
@@ -109,13 +100,13 @@ const PLATFORMS_META = [
 function defaultParams(workflowType) {
   switch (workflowType) {
     case 'lead-generation':
-      return { target_industry: 'Manufacturing', target_country: 'India', additional_context: '' }
+      return { location: '' }
     case 'social-product':
-      return { order_id: '', product_name: '', product_type: '', prompt: '', platforms: { facebook: true, instagram: true, linkedin: false } }
+      return { prompt: '', platforms: { facebook: true, instagram: true, linkedin: true } }
     case 'social-tech':
-      return { repo_name: '', prompt: '', platforms: { linkedin: true, facebook: false, instagram: false } }
+      return { prompt: '', platforms: { linkedin: true, facebook: true, instagram: true } }
     case 'blog':
-      return { topic: BLOG_TOPICS[0], custom_topic: '', keywords: '', word_count: 800, custom_prompt: '', use_custom_topic: false }
+      return { product_name: '', word_count: 900 }
     case 'cur-forwarder':
     case 'postgres-forwarder':
     case 'ai-sync':
@@ -168,39 +159,20 @@ function WorkflowParamForm({ workflowType, params, onChange }) {
 
   if (workflowType === 'lead-generation') return (
     <div className="space-y-3">
-      <FormField label="Target Industry">
-        <select value={params.target_industry} onChange={e => set('target_industry', e.target.value)} className="input">
-          {INDUSTRIES.map(i => <option key={i}>{i}</option>)}
-        </select>
-      </FormField>
-      <FormField label="Target Country / Region">
-        <select value={params.target_country} onChange={e => set('target_country', e.target.value)} className="input">
-          {COUNTRIES.map(c => <option key={c}>{c}</option>)}
-        </select>
-      </FormField>
-      <FormField label="Additional Context" hint="e.g. 'mid-size companies, procurement managers'">
-        <textarea value={params.additional_context} onChange={e => set('additional_context', e.target.value)}
-          className="input resize-none h-20" placeholder="Any specific targeting details…" />
+      <FormField label="Location" hint="City, state, or country to find buyer companies in">
+        <input value={params.location || ''} onChange={e => set('location', e.target.value)}
+          className="input" placeholder="e.g. Pune, Mumbai, Chennai, Ahmedabad…" />
       </FormField>
     </div>
   )
 
   if (workflowType === 'social-product') return (
     <div className="space-y-3">
-      <FormField label="Order ID" hint="Leave blank to use latest order">
-        <input value={params.order_id} onChange={e => set('order_id', e.target.value)}
-          className="input" placeholder="Order UUID or tracking token" />
-      </FormField>
-      <FormField label="Product Name" hint="Overrides order product name (optional)">
-        <input value={params.product_name} onChange={e => set('product_name', e.target.value)}
-          className="input" placeholder="e.g. Industrial Cleaning Bundle" />
-      </FormField>
-      <FormField label="Product Category" hint="Filters orders table if no order ID provided">
-        <input value={params.product_type} onChange={e => set('product_type', e.target.value)}
-          className="input" placeholder="e.g. Industrial, Office, Commercial" />
-      </FormField>
+      <p className="text-xs text-slate-400 -mt-1">
+        The workflow automatically picks the most recent delivered order that doesn't have a post yet.
+      </p>
       <FormField label="Custom Prompt (optional)" hint="Extra instructions for the AI">
-        <textarea value={params.prompt} onChange={e => set('prompt', e.target.value)}
+        <textarea value={params.prompt || ''} onChange={e => set('prompt', e.target.value)}
           className="input resize-none h-20" placeholder="Emphasise bulk discounts and fast delivery…" />
       </FormField>
       <FormField label="Publish To">
@@ -211,12 +183,11 @@ function WorkflowParamForm({ workflowType, params, onChange }) {
 
   if (workflowType === 'social-tech') return (
     <div className="space-y-3">
-      <FormField label="Repository Name" hint="Workflow reads {repo_name}/ai_context.md from S3">
-        <input value={params.repo_name} onChange={e => set('repo_name', e.target.value)}
-          className="input font-mono" placeholder="e.g. workflows-platform" />
-      </FormField>
-      <FormField label="Custom Prompt (optional)" hint="Extra direction beyond ai_context.md">
-        <textarea value={params.prompt} onChange={e => set('prompt', e.target.value)}
+      <p className="text-xs text-slate-400 -mt-1">
+        The workflow reads your tech context repo and auto-picks the next unposted topic.
+      </p>
+      <FormField label="Custom Prompt (optional)" hint="Extra direction beyond the context file">
+        <textarea value={params.prompt || ''} onChange={e => set('prompt', e.target.value)}
           className="input resize-none h-24" placeholder="Focus on the approval workflow feature…" />
       </FormField>
       <FormField label="Publish To">
@@ -227,36 +198,22 @@ function WorkflowParamForm({ workflowType, params, onChange }) {
 
   if (workflowType === 'blog') return (
     <div className="space-y-3">
-      <FormField label="Topic">
-        <select
-          value={params.use_custom_topic ? 'custom' : params.topic}
-          onChange={e => {
-            if (e.target.value === 'custom') onChange({ ...params, use_custom_topic: true, topic: '' })
-            else onChange({ ...params, use_custom_topic: false, topic: e.target.value })
-          }}
-          className="input">
-          {BLOG_TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
-          <option value="custom">Custom topic…</option>
-        </select>
-      </FormField>
-      {params.use_custom_topic && (
-        <FormField label="Custom Topic">
-          <input value={params.custom_topic} onChange={e => set('custom_topic', e.target.value)}
-            className="input" placeholder="Your custom blog topic…" />
-        </FormField>
-      )}
-      <FormField label="SEO Keywords" hint="Comma-separated">
-        <input value={params.keywords} onChange={e => set('keywords', e.target.value)}
-          className="input" placeholder="supply chain, B2B procurement, bulk supplies" />
+      <FormField label="Product Name" hint="Leave blank to auto-pick the next unwritten product">
+        <input value={params.product_name || ''} onChange={e => set('product_name', e.target.value)}
+          className="input" placeholder="e.g. MS Angles, SS Round Pipes, NYLOCK Nuts…" />
       </FormField>
       <FormField label="Target Word Count">
-        <select value={params.word_count} onChange={e => set('word_count', Number(e.target.value))} className="input">
-          {[500, 700, 800, 1000, 1200, 1500].map(n => <option key={n} value={n}>{n} words</option>)}
-        </select>
-      </FormField>
-      <FormField label="Additional Instructions (optional)">
-        <textarea value={params.custom_prompt} onChange={e => set('custom_prompt', e.target.value)}
-          className="input resize-none h-20" placeholder="Include a section on cost-saving strategies…" />
+        <div className="flex gap-1.5 flex-wrap">
+          {[700, 800, 900, 1000, 1200, 1500].map(n => (
+            <button key={n} type="button" onClick={() => set('word_count', n)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                ${(params.word_count || 900) === n
+                  ? 'bg-navy text-white border-navy'
+                  : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+              {n}w
+            </button>
+          ))}
+        </div>
       </FormField>
     </div>
   )
@@ -461,13 +418,19 @@ function ScheduleCard({ schedule, onEdit, onDelete, onToggle }) {
     const p = schedule.parameters || {}
     switch (schedule.workflow_type) {
       case 'lead-generation':
-        return [p.target_industry, p.target_country].filter(Boolean).join(' · ')
+        return p.location || '—'
       case 'social-product':
-        return [p.product_name || p.product_type, Object.entries(p.platforms || {}).filter(([,v])=>v).map(([k])=>k).join('/')].filter(Boolean).join(' · ')
+        return [
+          p.prompt && `prompt: ${p.prompt}`,
+          Object.entries(p.platforms || {}).filter(([,v])=>v).map(([k])=>k).join('/'),
+        ].filter(Boolean).join(' · ')
       case 'social-tech':
-        return [p.repo_name && `repo: ${p.repo_name}`, Object.entries(p.platforms || {}).filter(([,v])=>v).map(([k])=>k).join('/')].filter(Boolean).join(' · ')
+        return [
+          p.prompt && `prompt: ${p.prompt}`,
+          Object.entries(p.platforms || {}).filter(([,v])=>v).map(([k])=>k).join('/'),
+        ].filter(Boolean).join(' · ')
       case 'blog':
-        return p.use_custom_topic ? p.custom_topic : p.topic
+        return [p.product_name || 'Auto-pick', `${p.word_count || 900}w`].join(' · ')
       default: return '—'
     }
   }
@@ -547,36 +510,12 @@ function ExpandedParams({ schedule }) {
 
   if (schedule.workflow_type === 'lead-generation') return (
     <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-      <div><dt className="text-slate-400 text-xs">Industry</dt><dd className="text-navy font-medium">{p.target_industry || '—'}</dd></div>
-      <div><dt className="text-slate-400 text-xs">Country</dt><dd className="text-navy font-medium">{p.target_country || '—'}</dd></div>
-      {p.additional_context && (
-        <div className="col-span-2"><dt className="text-slate-400 text-xs">Context</dt><dd className="text-navy font-medium">{p.additional_context}</dd></div>
-      )}
+      <div className="col-span-2"><dt className="text-slate-400 text-xs">Location</dt><dd className="text-navy font-medium">{p.location || '—'}</dd></div>
     </dl>
   )
 
-  if (schedule.workflow_type === 'social-product') return (
+  if (schedule.workflow_type === 'social-product' || schedule.workflow_type === 'social-tech') return (
     <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-      {p.product_name && <div><dt className="text-slate-400 text-xs">Product Name</dt><dd className="text-navy font-medium">{p.product_name}</dd></div>}
-      {p.product_type && <div><dt className="text-slate-400 text-xs">Category</dt><dd className="text-navy font-medium">{p.product_type}</dd></div>}
-      {p.order_id && <div><dt className="text-slate-400 text-xs">Order ID</dt><dd className="text-navy font-medium font-mono text-xs">{p.order_id}</dd></div>}
-      <div className="col-span-2">
-        <dt className="text-slate-400 text-xs mb-1">Platforms</dt>
-        <dd className="flex gap-2">
-          {PLATFORMS_META.map(({ key, Icon, color, label }) => (
-            <span key={key} className={`flex items-center gap-1 text-xs ${p.platforms?.[key] ? color + ' font-medium' : 'text-slate-300'}`}>
-              <Icon size={13} />{label}
-            </span>
-          ))}
-        </dd>
-      </div>
-      {p.prompt && <div className="col-span-2"><dt className="text-slate-400 text-xs">Prompt</dt><dd className="text-navy text-xs">{p.prompt}</dd></div>}
-    </dl>
-  )
-
-  if (schedule.workflow_type === 'social-tech') return (
-    <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-      {p.repo_name && <div><dt className="text-slate-400 text-xs">Repository</dt><dd className="text-navy font-medium font-mono">{p.repo_name}</dd></div>}
       <div className="col-span-2">
         <dt className="text-slate-400 text-xs mb-1">Platforms</dt>
         <dd className="flex gap-2">
@@ -593,10 +532,8 @@ function ExpandedParams({ schedule }) {
 
   if (schedule.workflow_type === 'blog') return (
     <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-      <div className="col-span-2"><dt className="text-slate-400 text-xs">Topic</dt><dd className="text-navy font-medium">{p.use_custom_topic ? p.custom_topic : p.topic}</dd></div>
-      {p.keywords && <div className="col-span-2"><dt className="text-slate-400 text-xs">Keywords</dt><dd className="text-navy text-xs">{p.keywords}</dd></div>}
-      <div><dt className="text-slate-400 text-xs">Word Count</dt><dd className="text-navy font-medium">{p.word_count} words</dd></div>
-      {p.custom_prompt && <div className="col-span-2"><dt className="text-slate-400 text-xs">Instructions</dt><dd className="text-navy text-xs">{p.custom_prompt}</dd></div>}
+      <div><dt className="text-slate-400 text-xs">Product</dt><dd className="text-navy font-medium">{p.product_name || 'Auto-pick'}</dd></div>
+      <div><dt className="text-slate-400 text-xs">Word Count</dt><dd className="text-navy font-medium">{p.word_count || 900} words</dd></div>
     </dl>
   )
 

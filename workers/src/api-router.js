@@ -626,12 +626,15 @@ async function handleDataAction(path, request, sb, d1) {
 // SCHEDULES — fully in D1
 // ═══════════════════════════════════════════════════════════════════════════
 
-const VALID_SCHEDULE_TYPES = ['lead-generation','lead-email-existing','social-product','social-tech','blog','brevo-sync']
+const VALID_SCHEDULE_TYPES = [
+  'lead-generation','lead-email-existing','social-product','social-tech','blog',
+  'cur-forwarder','postgres-forwarder','ai-sync','s3-cleanup','brevo-sync',
+]
 
 function validateWorkflowInput(wfType, body) {
   switch (wfType) {
     case 'lead-generation':
-      if (!body.location && !body.target_country) return 'Missing required field: location'
+      if (!body.location) return 'Missing required field: location'
       break
     case 'lead-email-existing':
       if (!body.leadId && !body.lead_id) return 'Missing required field: leadId'
@@ -640,10 +643,10 @@ function validateWorkflowInput(wfType, body) {
       // No required fields — workflow auto-picks latest unposted order
       break
     case 'social-tech':
-      if (!body.repo_name) return 'Missing required field: repo_name'
+      // No required fields — workflow auto-picks next context file from GitHub repo
       break
     case 'blog':
-      if (!body.topic && !body.custom_topic && !body.product_name) return 'Missing required field: topic, custom_topic, or product_name'
+      // No required fields — blank product_name auto-picks next unwritten product
       break
     case 'payment-followup':
       // No required fields - uses default parameters
