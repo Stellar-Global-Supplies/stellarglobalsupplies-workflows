@@ -55,6 +55,15 @@ export const CORS_HEADERS = {
     return { hour: Math.floor(totalMin / 60) % 24, minute: totalMin % 60 }
   }
   
+  /** Normalize days_of_week — D1 stores it as a JSON string (e.g. "[1,3]") */
+  function normalizeDow(value) {
+    if (Array.isArray(value)) return value
+    if (typeof value === 'string' && value.trim()) {
+      try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : [] } catch { return [] }
+    }
+    return []
+  }
+
   /** Build a cron expression (CF format: min hour dom month dow) from a schedule row */
   export function buildCron(schedule) {
     const { hour, minute } = istToUtc(schedule.run_time || '09:00')
@@ -62,8 +71,9 @@ export const CORS_HEADERS = {
   
     if (freq === 'daily')   return `${minute} ${hour} * * *`
     if (freq === 'weekly') {
-      const days = (schedule.days_of_week || [1]).map(d => d % 7).join(',')
-      return `${minute} ${hour} * * ${days}`
+      const days = normalizeDow(schedule.days_of_week)
+      if (!days.length) return `${minute} ${hour} * * 1` // default to Monday
+      return `${minute} ${hour} * * ${days.map(d => d % 7).join(',')}`
     }
     // monthly
     return `${minute} ${hour} ${schedule.day_of_month || 1} * *`
