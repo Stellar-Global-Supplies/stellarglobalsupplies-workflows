@@ -89,6 +89,16 @@ const WORKFLOW_TYPES = [
 ]
 
 const DAYS_OF_WEEK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+// Normalize days_of_week — D1 stores it as a JSON string (e.g. "[1,3]")
+function normalizeDow(value) {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : [] } catch { return [] }
+  }
+  return []
+}
+
 const PLATFORMS_META = [
   { key: 'facebook',  label: 'Facebook',  Icon: Facebook,  color: 'text-[#1877F2]' },
   { key: 'instagram', label: 'Instagram', Icon: Instagram, color: 'text-[#E1306C]' },
@@ -226,9 +236,10 @@ function WorkflowParamForm({ workflowType, params, onChange }) {
 function ScheduleTimingForm({ form, setForm }) {
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
 
+  const days = normalizeDow(form.days_of_week)
+
   const toggleDow = (day) => {
-    const curr = form.days_of_week || []
-    const next = curr.includes(day) ? curr.filter(d => d !== day) : [...curr, day]
+    const next = days.includes(day) ? days.filter(d => d !== day) : [...days, day]
     set('days_of_week', next)
   }
 
@@ -262,7 +273,7 @@ function ScheduleTimingForm({ form, setForm }) {
         <FormField label="Days of Week">
           <div className="flex gap-1.5 flex-wrap">
             {DAYS_OF_WEEK.map((day, i) => {
-              const active = (form.days_of_week || []).includes(i)
+              const active = days.includes(i)
               return (
                 <button key={day} type="button" onClick={() => toggleDow(i)}
                   className={`w-10 h-9 rounded-lg border text-xs font-medium transition-all
@@ -290,16 +301,18 @@ function ScheduleModal({ open, onClose, editing, workflowType }) {
   const isEdit = Boolean(editing)
 
   const [form, setForm] = useState(() =>
-    editing ? { ...editing, parameters: { ...editing.parameters } } : defaultSchedule(workflowType)
+    editing
+      ? { ...editing, days_of_week: normalizeDow(editing.days_of_week), parameters: { ...editing.parameters } }
+      : defaultSchedule(workflowType)
   )
   const [section, setSection] = useState('timing') // 'timing' | 'params'
 
   const wf = WORKFLOW_TYPES.find(w => w.key === form.workflow_type)
 
   const saveMut = useMutation({
-    mutationFn: () => isEdit
-      ? updateSchedule(editing.id, form)
-      : createSchedule(form),
+    mutationFn: (payload) => isEdit
+      ? updateSchedule(editing.id, payload)
+      : createSchedule(payload),
     onSuccess: () => {
       toast.success(isEdit ? 'Schedule updated' : 'Schedule created')
       qc.invalidateQueries({ queryKey: ['schedules'] })
@@ -310,10 +323,13 @@ function ScheduleModal({ open, onClose, editing, workflowType }) {
 
   function handleSave() {
     if (!form.label.trim()) { toast.error('Please enter a label'); return }
-    if (form.frequency === 'weekly' && (!form.days_of_week || form.days_of_week.length === 0)) {
+    const dow = normalizeDow(form.days_of_week)
+    if (form.frequency === 'weekly' && dow.length === 0) {
       toast.error('Select at least one day of week'); return
     }
-    saveMut.mutate()
+    // Ensure days_of_week is always an array on save
+    const payload = { ...form, days_of_week: dow }
+    saveMut.mutate(payload)
   }
 
   return (
@@ -403,7 +419,7 @@ function ScheduleCard({ schedule, onEdit, onDelete, onToggle }) {
     const time = s.run_time ? `at ${s.run_time} IST` : ''
     if (s.frequency === 'daily') return `Every day ${time}`
     if (s.frequency === 'weekly') {
-      const names = (s.days_of_week || []).sort().map(d => DAYS_OF_WEEK[d]).join(', ')
+      const names = normalizeDow(s.days_of_week).sort().map(d => DAYS_OF_WEEK[d]).join(', ')
       return `Every ${names || '—'} ${time}`
     }
     if (s.frequency === 'monthly') {

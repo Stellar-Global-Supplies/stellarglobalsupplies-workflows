@@ -688,17 +688,29 @@ async function handleSchedules(path, method, request, qs, d1) {
   return err('Unknown route', 404)
 }
 
+function deserializeSchedule(row) {
+  if (!row) return row
+  const out = { ...row }
+  try {
+    if (typeof out.days_of_week === 'string') out.days_of_week = JSON.parse(out.days_of_week)
+  } catch { /* keep as-is */ }
+  try {
+    if (typeof out.parameters === 'string') out.parameters = JSON.parse(out.parameters)
+  } catch { /* keep as-is */ }
+  return out
+}
+
 async function listSchedules(d1, qs) {
   const filters = { _order: 'created_at DESC' }
   if (qs.get('workflow_type')) filters.workflow_type = qs.get('workflow_type')
   const rows = await d1.select('workflow_schedules', filters)
-  return ok({ schedules: rows, count: rows.length })
+  return ok({ schedules: rows.map(deserializeSchedule), count: rows.length })
 }
 
 async function getSchedule(d1, sid) {
   const rows = await d1.select('workflow_schedules', { id: sid, _limit: 1 })
   if (!rows.length) return err('Schedule not found', 404)
-  return ok({ schedule: rows[0] })
+  return ok({ schedule: deserializeSchedule(rows[0]) })
 }
 
 async function createSchedule(d1, body) {
@@ -740,7 +752,7 @@ async function updateSchedule(d1, sid, body) {
 
   await d1.update('workflow_schedules', update, { id: sid })
   const updated = await d1.select('workflow_schedules', { id: sid, _limit: 1 })
-  return ok({ schedule: updated[0], message: 'Schedule updated' })
+  return ok({ schedule: deserializeSchedule(updated[0]), message: 'Schedule updated' })
 }
 
 async function deleteSchedule(d1, sid) {
