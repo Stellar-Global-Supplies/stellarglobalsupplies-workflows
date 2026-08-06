@@ -31,6 +31,10 @@ service  = "s3-cleanup"
 binding  = "SVC_BREVO_SYNC"
 service  = "brevo-sync"
 
+[[services]]
+binding = "SVC_BREVO_CAMPAIGN"
+service = "brevo-campaign"
+
 # Workers AI binding — FLUX image generation
 [ai]
 binding = "AI"

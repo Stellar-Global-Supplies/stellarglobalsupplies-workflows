@@ -121,3 +121,40 @@ export async function brevoSyncRun(ctx) {
     }, { id: ctx.workflow_run_id })
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step: Run Brevo Campaign
+// Calls brevo-campaign worker via service binding — builds HTML, creates
+// Brevo email campaign, and sends it. Accepts full campaign params in payload.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function brevoCampaignRun(ctx) {
+  const { env, payload } = ctx
+
+  if (!env.SVC_BREVO_CAMPAIGN) {
+    throw new Error('Service binding SVC_BREVO_CAMPAIGN is not configured on stellarglobalsupplies-workflows')
+  }
+
+  console.log(`[brevo_campaign_run] triggering campaign for "${payload.productTitle}" → lists ${JSON.stringify(payload.listIds)}`)
+
+  // POST the full payload — campaign worker needs the product params
+  const res = await env.SVC_BREVO_CAMPAIGN.fetch('http://worker/run', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body:    JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`brevo-campaign worker returned HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+
+  const data = await res.json().catch(() => null)
+  console.log(`[brevo_campaign_run] started: ${JSON.stringify(data)}`)
+
+  if (ctx.workflow_run_id) {
+    await ctx.d1.update('workflow_runs', {
+      output: { ...data, step: 'brevo_campaign_run' },
+    }, { id: ctx.workflow_run_id })
+  }
+}

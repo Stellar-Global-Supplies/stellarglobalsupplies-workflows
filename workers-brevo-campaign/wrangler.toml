@@ -1,0 +1,22 @@
+name               = "brevo-campaign"
+main               = "index.js"
+compatibility_date = "2025-04-01"
+workers_dev        = true
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
+# No [triggers] crons — triggered on-demand via the job runner service binding.
+# Scheduled sends are handled by passing scheduledAt in the POST /run payload.
+
+# ── Secrets (Cloudflare Secrets Store) ───────────────────────────────────────
+[[secrets_store_secrets]]
+binding     = "BREVO_API_KEY"
+secret_name = "BREVO_API_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "BREVO_SENDER_EMAIL"
+secret_name = "BREVO_SENDER_EMAIL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"

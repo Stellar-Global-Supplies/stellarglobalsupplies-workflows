@@ -93,6 +93,7 @@ const VALID_WORKFLOW_TYPES = [
   'lead-generation', 'lead-email-existing', 'social-product',
   'social-tech', 'blog', 'payment-followup',
   'cur-forwarder', 'postgres-forwarder', 'ai-sync', 's3-cleanup', 'brevo-sync',
+  'brevo-campaign',
 ]
 
 const FIRST_STEP = {
@@ -107,6 +108,7 @@ const FIRST_STEP = {
   'ai-sync':            'ai_sync_run',
   's3-cleanup':         's3_cleanup_run',
   'brevo-sync':         'brevo_sync_run',
+  'brevo-campaign':     'brevo_campaign_run',
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -629,6 +631,7 @@ async function handleDataAction(path, request, sb, d1) {
 const VALID_SCHEDULE_TYPES = [
   'lead-generation','lead-email-existing','social-product','social-tech','blog',
   'cur-forwarder','postgres-forwarder','ai-sync','s3-cleanup','brevo-sync',
+  'brevo-campaign',
 ]
 
 function validateWorkflowInput(wfType, body) {
@@ -665,6 +668,15 @@ function validateWorkflowInput(wfType, body) {
       break
     case 'brevo-sync':
       // No required fields — triggers Brevo sync on demand
+      break
+    case 'brevo-campaign':
+      if (!body.productTitle)    return 'Missing required field: productTitle'
+      if (!body.productSubtitle) return 'Missing required field: productSubtitle'
+      if (!body.productImageUrl) return 'Missing required field: productImageUrl'
+      if (!body.productDesc)     return 'Missing required field: productDesc'
+      if (!body.campaignSubject) return 'Missing required field: campaignSubject'
+      if (!Array.isArray(body.listIds) || body.listIds.length === 0)
+        return 'listIds must be a non-empty array of Brevo list IDs'
       break
   }
   return null

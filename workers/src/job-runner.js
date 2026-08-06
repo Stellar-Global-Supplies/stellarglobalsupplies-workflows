@@ -55,6 +55,7 @@ import {
   aiSyncRun,
   s3CleanupRun,
   brevoSyncRun,
+  brevoCampaignRun,
 } from './steps/tech-jobs.js'
 
 export default {
@@ -335,4 +336,7 @@ const STEP_HANDLERS = {
 
   // ── Brevo Contact Sync ──────────────────────────────────────────── LIVE ✓ ──
   brevo_sync_run:              (ctx) => brevoSyncRun(ctx),
+
+  // ── Brevo Email Campaign ─────────────────────────────────────────── LIVE ✓ ──
+  brevo_campaign_run:          (ctx) => brevoCampaignRun(ctx),
 }

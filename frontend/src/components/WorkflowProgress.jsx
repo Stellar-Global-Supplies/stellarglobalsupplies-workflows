@@ -68,6 +68,7 @@ export const TECH_JOB_STEPS = {
   ai_sync_run:        'Running AI Data Sync',
   s3_cleanup_run:     'Running S3 Cleanup',
   brevo_sync_run:     'Running Brevo Contact Sync',
+  brevo_campaign_run: 'Sending Email Campaign',
 }
 
 export const TECH_STEPS = {

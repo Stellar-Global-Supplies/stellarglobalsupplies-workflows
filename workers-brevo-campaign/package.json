@@ -1,0 +1,15 @@
+{
+    "name": "brevo-campaign",
+    "version": "1.0.0",
+    "description": "Cloudflare Worker — builds and sends branded Stellar email campaigns via Brevo",
+    "private": true,
+    "type": "module",
+    "scripts": {
+      "dev":    "wrangler dev",
+      "deploy": "wrangler deploy",
+      "tail":   "wrangler tail"
+    },
+    "devDependencies": {
+      "wrangler": "^4.0.0"
+    }
+  }
