@@ -32,6 +32,7 @@ const BUCKET_POLICIES = [
   { bucket: "stellar-global-prod-attachments-20260627040526193400000001",    prefix: "",                                 max_age_days: 2 },
   { bucket: "stellarglobal-costing-bucket",                                  prefix: "awscost/",                       max_age_days: 2 },
   { bucket: "stellarglobal-costing-bucket",                                  prefix: "processed/",                       max_age_days: 2 },
+  { bucket: "stellar-nr-cloudtrail-logs-471112840461-prod",                  prefix: "",                                 max_age_days: 1 },
 ];
 
 // ── Worker entry point ─────────────────────────────────────────────────────
