@@ -8,13 +8,13 @@ const LANDING_URL =
 const MAX_AGE_MS = 5 * 60 * 1000
 
 /**
- * Validates and normalizes the post-login redirect.
+ * Validate and normalize the post-login redirect.
  *
- * Only same-origin HTTP/HTTPS URLs are allowed.
- * Anything external, malformed, or using another protocol
- * falls back to the application root.
+ * Only URLs belonging to the current application origin are allowed.
+ * External URLs, javascript:, data:, protocol-relative URLs, and
+ * malformed URLs fall back to the application root.
  */
-function getSafeRedirect(value: string | null): string {
+function getSafeRedirect(value) {
   const fallback = '/'
 
   if (!value) {
@@ -24,26 +24,29 @@ function getSafeRedirect(value: string | null): string {
   try {
     const target = new URL(value, window.location.origin)
 
-    // Only allow redirects to this application's exact origin.
+    // Only allow the exact current application origin.
     if (target.origin !== window.location.origin) {
       return fallback
     }
 
     // Only allow normal HTTP/HTTPS navigation.
-    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    if (
+      target.protocol !== 'http:' &&
+      target.protocol !== 'https:'
+    ) {
       return fallback
     }
 
     return target.href
   } catch {
-    // Invalid/malformed URL.
+    // Invalid or malformed URL.
     return fallback
   }
 }
 
 export default function SSOCallback() {
   const [status, setStatus] = useState('Verifying your session…')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -95,32 +98,24 @@ export default function SSOCallback() {
 
         return data
       })
-      .then(
-        async ({
-          access_token,
-          refresh_token,
-        }: {
-          access_token: string
-          refresh_token: string
-        }) => {
-          setStatus('Setting up your workspace…')
+      .then(async ({ access_token, refresh_token }) => {
+        setStatus('Setting up your workspace…')
 
-          const { error: authErr } =
-            await supabase.auth.setSession({
-              access_token,
-              refresh_token,
-            })
+        const { error: authErr } =
+          await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          })
 
-          if (authErr) {
-            throw new Error(authErr.message)
-          }
-
-          // SECURITY:
-          // redirect has already been validated and normalized
-          // to the current application's origin.
-          window.location.replace(redirect)
+        if (authErr) {
+          throw new Error(authErr.message)
         }
-      )
+
+        // SECURITY:
+        // redirect has already been validated and normalized
+        // to the current application's origin.
+        window.location.replace(redirect)
+      })
       .catch(err => {
         setError(
           err instanceof Error
