@@ -20,18 +20,18 @@ import toast from 'react-hot-toast'
 // ── Step label maps per workflow type ─────────────────────────────────────
 
 export const PAYMENT_STEPS = {
-  payment_fetch_overdue:        'Fetching overdue orders',
-  payment_bedrock_draft_email:  'AI drafting payment email',
-  payment_approval_gate:        'Sending for approval',
-  payment_send_email:           'Sending email to customer',
+  payment_fetch_overdue:   'Fetching overdue orders',
+  payment_cf_draft_email:  'AI drafting payment email',
+  payment_approval_gate:   'Sending for approval',
+  payment_send_email:      'Sending email to customer',
 }
 
 export const SOCIAL_STEPS = {
-  social_get_orders:             'Fetching recent orders',
-  social_bedrock_generate_post:  'AI generating social content',
-  social_image_submit:           'Submitting image generation',
-  social_image_poll:             'Generating image',
-  social_post_to_platforms:      'Publishing to platforms',
+  social_get_orders:         'Fetching recent orders',
+  social_cf_generate_post:   'AI generating social content',
+  social_image_submit:       'Submitting image generation',
+  social_image_poll:         'Generating image',
+  social_post_to_platforms:  'Publishing to platforms',
 }
 
 export const BLOG_STEPS = {
@@ -45,11 +45,25 @@ export const BLOG_STEPS = {
 export const LEAD_GEN_STEPS = {
   lead_select_product_and_industry: 'Selecting product & industry',
   lead_tavily_find_buyers:          'Searching for real companies',
-  lead_groq_extract_company:        'Extracting company data',
+  lead_cf_extract_company:          'Extracting company data',
   lead_check_duplicate:             'Checking for duplicates',
   lead_tavily_find_contact:         'Finding decision maker',
   lead_tavily_scrape_website:       'Scraping company website',
-  lead_groq_extract_email:          'Extracting contact email',
+  lead_cf_extract_email:            'Extracting contact email',
+  lead_save:                        'Saving lead to database',
+  lead_gen_draft_email:             'AI drafting outreach email',
+  lead_gen_approval_gate:           'Sending for approval',
+  lead_gen_send_email:              'Sending outreach email',
+}
+
+export const LEAD_GEN_PROMO_STEPS = {
+  lead_promo_init:                  'Setting up ICP & MIDC hub',
+  lead_promo_tavily_find_buyers:    'Searching for real companies',
+  lead_promo_extract_company:       'Extracting company data',
+  lead_check_duplicate:             'Checking for duplicates',
+  lead_tavily_find_contact:         'Finding decision maker',
+  lead_tavily_scrape_website:       'Scraping company website',
+  lead_cf_extract_email:            'Extracting contact email',
   lead_save:                        'Saving lead to database',
   lead_gen_draft_email:             'AI drafting outreach email',
   lead_gen_approval_gate:           'Sending for approval',
@@ -57,9 +71,9 @@ export const LEAD_GEN_STEPS = {
 }
 
 export const LEAD_EMAIL_STEPS = {
-  lead_load_existing:       'Loading lead data',
-  lead_bedrock_draft_email: 'AI drafting outreach email',
-  lead_send_email:          'Sending outreach email',
+  lead_load_existing: 'Loading lead data',
+  lead_cf_draft_email:'AI drafting outreach email',
+  lead_send_email:    'Sending outreach email',
 }
 
 export const TECH_JOB_STEPS = {

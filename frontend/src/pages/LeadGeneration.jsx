@@ -2,11 +2,12 @@ import { useState }              from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { startWorkflow, getLeads }  from '../services/api'
 import { PageHeader, EmptyState, Skeleton } from '../components/ui'
-import WorkflowProgress, { LEAD_GEN_STEPS } from '../components/WorkflowProgress'
+import WorkflowProgress, { LEAD_GEN_STEPS, LEAD_GEN_PROMO_STEPS } from '../components/WorkflowProgress'
 import {
   Users, MapPin, Play, RefreshCw,
   Globe, Mail, Phone, Building2,
   CheckCircle, Clock, AlertTriangle, Eye,
+  Target,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -18,6 +19,14 @@ const PRODUCTS = [
   { name: 'MS Sheet & Chequered Plate',   buyers: 'Press shops, auto ancillaries' },
   { name: 'Stainless Steel Products',     buyers: 'Food processing, pharma, hospitality' },
   { name: 'Industrial Fasteners',         buyers: 'OEM manufacturers, machine builders' },
+]
+
+// ── Promo products — fastener/locking line, fixed ICP (MIDC, medium/large, bulk) ──
+const PROMO_PRODUCTS = [
+  { name: 'MS Nylock Nuts',    detail: 'Vibration-resistant lock nuts' },
+  { name: 'Nord-Lock Washers', detail: 'Wedge-locking washers' },
+  { name: 'Internal Circlips', detail: 'DIN 472 retaining rings' },
+  { name: 'External Circlips', detail: 'DIN 471 retaining rings' },
 ]
 
 const STATUS_CONFIG = {
@@ -44,7 +53,9 @@ const PRESETS = [
 
 export default function LeadGeneration() {
   const qc = useQueryClient()
+  const [mode,         setMode]         = useState('location') // 'location' | 'promo'
   const [location,    setLocation]    = useState('')
+  const [promoProduct, setPromoProduct] = useState('')
   const [launching,   setLaunching]   = useState(false)
   const [activeRunId, setActiveRunId] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -68,6 +79,22 @@ export default function LeadGeneration() {
     setActiveRunId(null)
     try {
       const res = await startWorkflow('lead-generation', { location: loc })
+      setActiveRunId(res.workflowRunId)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setLaunching(false)
+    }
+  }
+
+  async function handleLaunchPromo(e) {
+    e?.preventDefault()
+    if (!promoProduct) { toast.error('Please select a product'); return }
+
+    setLaunching(true)
+    setActiveRunId(null)
+    try {
+      const res = await startWorkflow('lead-generation-promo', { product_name: promoProduct })
       setActiveRunId(res.workflowRunId)
     } catch (err) {
       toast.error(err.message)
@@ -103,7 +130,22 @@ export default function LeadGeneration() {
         </button>
       </PageHeader>
 
-      {/* ── Launch Panel ─────────────────────────────────────────────────── */}
+      {/* ── Mode Toggle ──────────────────────────────────────────────────── */}
+      <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5 mb-5 w-fit">
+        <button onClick={() => setMode('location')}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors
+            ${mode === 'location' ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-navy'}`}>
+          <MapPin size={13} /> By Location
+        </button>
+        <button onClick={() => setMode('promo')}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors
+            ${mode === 'promo' ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-navy'}`}>
+          <Target size={13} /> By Promo Product
+        </button>
+      </div>
+
+      {/* ── Launch Panel — By Location ───────────────────────────────────── */}
+      {mode === 'location' && (
       <div className="card p-5 mb-5">
         <p className="text-sm font-semibold text-navy mb-4 flex items-center gap-2">
           <MapPin size={15} className="text-amber" /> Find Leads by Location
@@ -170,13 +212,88 @@ export default function LeadGeneration() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* ── Launch Panel — By Promo Product ──────────────────────────────── */}
+      {mode === 'promo' && (
+      <div className="card p-5 mb-5">
+        <p className="text-sm font-semibold text-navy mb-4 flex items-center gap-2">
+          <Target size={15} className="text-amber" /> Find Leads by Promo Product
+        </p>
+
+        {/* Product picker */}
+        <div className="flex gap-3 mb-4">
+          <div className="grid grid-cols-2 gap-2 flex-1">
+            {PROMO_PRODUCTS.map(p => (
+              <button key={p.name} type="button"
+                onClick={() => setPromoProduct(p.name)}
+                className={`text-left px-3 py-2.5 rounded-xl border transition-colors
+                  ${promoProduct === p.name
+                    ? 'bg-navy text-white border-navy'
+                    : 'bg-white text-navy border-slate-200 hover:border-slate-300'}`}>
+                <span className="block text-xs font-semibold">{p.name}</span>
+                <span className={`block text-xs mt-0.5 ${promoProduct === p.name ? 'text-white/70' : 'text-slate-400'}`}>
+                  {p.detail}
+                </span>
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={handleLaunchPromo}
+            disabled={launching || !promoProduct}
+            className="btn-primary gap-2 px-5 disabled:opacity-50 whitespace-nowrap self-start">
+            {launching
+              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Finding…</>
+              : <><Play size={14} />Find Lead</>
+            }
+          </button>
+        </div>
+
+        {/* Fixed ICP info */}
+        <div className="border border-slate-100 rounded-xl overflow-hidden">
+          <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-100">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Fixed target profile — same for every run, only the product changes
+            </p>
+          </div>
+          <div className="divide-y divide-slate-50">
+            <div className="flex items-center gap-4 px-4 py-2.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber flex-shrink-0" />
+              <span className="text-xs font-medium text-navy w-32 flex-shrink-0">Sectors</span>
+              <span className="text-xs text-slate-400">Manufacturing, Automotive, Aerospace, Construction, Engineering</span>
+            </div>
+            <div className="flex items-center gap-4 px-4 py-2.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber flex-shrink-0" />
+              <span className="text-xs font-medium text-navy w-32 flex-shrink-0">Business size</span>
+              <span className="text-xs text-slate-400">Medium to large enterprises</span>
+            </div>
+            <div className="flex items-center gap-4 px-4 py-2.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber flex-shrink-0" />
+              <span className="text-xs font-medium text-navy w-32 flex-shrink-0">Geography</span>
+              <span className="text-xs text-slate-400">Maharashtra MIDC industrial hubs (rotates each run)</span>
+            </div>
+            <div className="flex items-center gap-4 px-4 py-2.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber flex-shrink-0" />
+              <span className="text-xs font-medium text-navy w-32 flex-shrink-0">Intent</span>
+              <span className="text-xs text-slate-400">Regular, recurring bulk orders — long-term supply partnership fit</span>
+            </div>
+          </div>
+          <div className="bg-blue-50 px-4 py-2.5 border-t border-blue-100">
+            <p className="text-xs text-blue-700">
+              <strong>How it works:</strong> Just pick a product — the workflow rotates through Maharashtra's MIDC hubs
+              and manufacturing sectors automatically, so running it multiple times finds diverse leads across the belt.
+            </p>
+          </div>
+        </div>
+      </div>
+      )}
 
       {/* ── Live Progress ─────────────────────────────────────────────────── */}
       {activeRunId && (
         <div className="mb-5">
           <WorkflowProgress
             runId={activeRunId}
-            stepLabels={LEAD_GEN_STEPS}
+            stepLabels={mode === 'promo' ? LEAD_GEN_PROMO_STEPS : LEAD_GEN_STEPS}
             onComplete={handleComplete}
             onClose={() => setActiveRunId(null)}
           />

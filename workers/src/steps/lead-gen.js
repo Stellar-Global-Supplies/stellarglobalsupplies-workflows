@@ -17,30 +17,36 @@
  *   plant & machinery makers, pharmaceutical plant builders,
  *   food processing equipment makers, HVAC companies, furniture manufacturers
  *
- * Steps:
- *   lead_select_product_and_industry  → Groq picks best product + industry match for location
+ * Steps (STANDARD pipeline — input: location):
+ *   lead_select_product_and_industry  → CF AI picks best product + industry match for location
  *   lead_tavily_find_buyers           → Tavily finds real companies buying that product
- *   lead_groq_extract_company         → Groq extracts structured company data
+ *   lead_cf_extract_company           → CF AI extracts structured company data
  *   lead_check_duplicate              → skip if already in DB
  *   lead_tavily_find_contact          → Tavily finds procurement/purchase decision maker
  *   lead_tavily_scrape_website        → Tavily scrapes website for email/phone
- *   lead_groq_extract_email           → Groq extracts best email with fallback chain
+ *   lead_cf_extract_email             → CF AI extracts best email with fallback chain
  *   lead_save                         → save to Supabase
- *   lead_gen_draft_email              → Bedrock drafts product-specific outreach
+ *   lead_gen_draft_email              → CF AI drafts product-specific outreach
  *   lead_gen_approval_gate            → email notification + dashboard approval
  *   lead_gen_send_email               → send approved email via Gmail
  *
+ * Steps (PROMO pipeline — input: product_name only, e.g. "MS Nylock Nuts"):
+ *   lead_promo_init                   → hardcoded ICP + rotates MIDC hub, builds search context
+ *   lead_promo_tavily_find_buyers     → Tavily finds companies in MIDC hub matching ICP
+ *   lead_promo_extract_company        → CF AI extracts structured company data (bulk/recurring framing)
+ *   → rejoins standard pipeline at lead_check_duplicate onward
+ *
  * Required secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY,
- *   BEDROCK_ACCESS_KEY_ID, BEDROCK_SECRET_ACCESS_KEY, BEDROCK_REGION,
- *   GROQ_API_KEY, TAVILY_API_KEY,
+ *   TAVILY_API_KEY,
  *   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN,
  *   SENDER_EMAIL, REVIEWER_EMAIL, API_BASE_URL
+ * (AI inference uses CF Workers AI binding — no Bedrock/Groq keys needed)
  */
 
-import { bedrockGenerateJson } from '../lib/bedrock.js'
-import { getClient }           from '../lib/supabase.js'
-import { nowIso }              from '../lib/utils.js'
-import { nextJob, insertApprovalGate } from '../job-runner.js'
+import { cfAiGenerateJson, cfAiExtractJson } from '../lib/cf-ai.js'
+import { getClient }                         from '../lib/supabase.js'
+import { nowIso }                            from '../lib/utils.js'
+import { nextJob, insertApprovalGate }       from '../job-runner.js'
 
 async function resolveSecret(val) {
   if (!val) return undefined
@@ -48,7 +54,6 @@ async function resolveSecret(val) {
   return String(val)
 }
 
-const GROQ_BASE  = 'https://api.groq.com/openai/v1/chat/completions'
 const TAVILY_BASE = 'https://api.tavily.com'
 
 // ── Stellar product catalogue ─────────────────────────────────────────────────
@@ -87,32 +92,6 @@ const SKIP_DOMAINS = new Set([
   'indiamart.com','tradeindia.com','exportersindia.com','alibaba.com',
   'amazon.in','flipkart.com','google.com','bing.com','yahoo.com',
 ])
-
-
-// ── Groq helpers ──────────────────────────────────────────────────────────────
-
-async function groqJson(env, prompt, system, maxTokens = 800) {
-  const apiKey = await resolveSecret(env.GROQ_API_KEY)
-  if (!apiKey) throw new Error('Missing secret: GROQ_API_KEY')
-
-  const res = await fetch(GROQ_BASE, {
-    method:  'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      model:           'llama-3.3-70b-versatile',
-      messages:        [
-        { role: 'system', content: system || 'Return valid JSON only. No preamble, no markdown.' },
-        { role: 'user',   content: prompt },
-      ],
-      temperature:     0.2,
-      max_tokens:      maxTokens,
-      response_format: { type: 'json_object' },
-    }),
-  })
-  if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
-  const data = await res.json()
-  return JSON.parse(data.choices[0].message.content)
-}
 
 
 // ── Tavily helpers ────────────────────────────────────────────────────────────
@@ -173,7 +152,7 @@ Return JSON:
   "why_this_industry":   "one sentence explaining why this industry buys this product"
 }`
 
-  const result = await groqJson(env, prompt,
+  const result = await cfAiExtractJson(env, prompt,
     'You are a B2B sales intelligence expert. Return valid JSON only.', 400)
 
   console.log(`[lead_select] location=${location} product=${result.selected_product} industry=${result.selected_industry}`)
@@ -266,7 +245,7 @@ Return JSON:
 
   let selectedIdx = 0
   try {
-    const pick = await groqJson(env, pickPrompt, 'Pick the best B2B lead. Return JSON only.', 200)
+    const pick = await cfAiExtractJson(env, pickPrompt, 'Pick the best B2B lead. Return JSON only.', 200)
     selectedIdx = Math.min(parseInt(pick.selected_index) || 0, companies.length - 1)
     console.log(`[lead_tavily_find_buyers] picked idx=${selectedIdx} confidence=${pick.confidence} reason=${pick.reason}`)
   } catch (e) {
@@ -276,7 +255,7 @@ Return JSON:
   const company = companies[selectedIdx]
   console.log(`[lead_tavily_find_buyers] selected=${company.company_name} domain=${company.domain}`)
 
-  await nextJob(ctx, 'lead_groq_extract_company', {
+  await nextJob(ctx, 'lead_cf_extract_company', {
     ...payload,
     company,
     companies,
@@ -285,10 +264,285 @@ Return JSON:
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PROMO PIPELINE — Fastener/Locking Product Lead Generation
+// Input: product_name only (e.g. "MS Nylock Nuts", "Nord-Lock Washers",
+//        "Internal Circlips", "External Circlips")
+//
+// Fixed ICP (hardcoded, not user input):
+//   Sectors:   Manufacturing, Automotive, Aerospace, Construction, Engineering
+//   Size:      Medium to large enterprises
+//   Geography: Maharashtra MIDC industrial hubs
+//   Intent:    Regular/recurring bulk orders, long-term supply partnership fit
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PROMO_PRODUCTS = {
+  'MS Nylock Nuts': {
+    aliases:  ['MS Nylock Nuts', 'Nylock Nuts', 'Nylon Insert Lock Nuts'],
+    pitch:    'MS NYLOCK Nuts (Nylon Insert Lock Nuts) — vibration-resistant locking, Grade 8.8+, bulk stock',
+    use_case: 'anti-vibration fastening in machinery assembly, chassis mounting, and structural joints',
+  },
+  'Nord-Lock Washers': {
+    aliases:  ['Nord-Lock Washers', 'Nordlock Washers', 'Wedge Locking Washers'],
+    pitch:    'Nord-Lock Washers — wedge-locking technology for high-vibration bolted joints, zero maintenance',
+    use_case: 'critical bolted joints in heavy machinery, wind turbines, and automotive assembly lines subject to dynamic loads',
+  },
+  'Internal Circlips': {
+    aliases:  ['Internal Circlips', 'Internal Circlips DIN 472', 'Retaining Rings Internal'],
+    pitch:    'Internal Circlips (DIN 472) — precision retaining rings for bore applications, spring steel',
+    use_case: 'shaft and bore retention in gearboxes, bearings, and precision-machined assemblies',
+  },
+  'External Circlips': {
+    aliases:  ['External Circlips', 'External Circlips DIN 471', 'Retaining Rings External'],
+    pitch:    'External Circlips (DIN 471) — precision retaining rings for shaft applications, spring steel',
+    use_case: 'shaft retention in automotive transmissions, aerospace actuators, and rotating machinery',
+  },
+}
+
+const PROMO_SECTORS = [
+  { name: 'Automotive & Auto Ancillary',      terms: ['auto component manufacturer', 'automotive OEM supplier', 'auto ancillary unit'] },
+  { name: 'Manufacturing & Engineering',      terms: ['precision engineering company', 'industrial machine manufacturer', 'heavy engineering works'] },
+  { name: 'Aerospace & Defence',              terms: ['aerospace component manufacturer', 'defence equipment manufacturer'] },
+  { name: 'Construction & Infrastructure',    terms: ['construction equipment manufacturer', 'infrastructure EPC contractor'] },
+]
+
+// Maharashtra MIDC industrial hubs — rotated per run for geographic spread
+const MIDC_HUBS = [
+  'Pune MIDC',
+  'Chakan MIDC',
+  'Bhosari MIDC',
+  'Ranjangaon MIDC',
+  'Talegaon MIDC',
+  'Taloja MIDC',
+  'Nashik MIDC (Satpur/Ambad)',
+  'Aurangabad MIDC (Waluj/Shendra)',
+  'Butibori MIDC, Nagpur',
+  'Kolhapur MIDC (Shiroli/Gokul Shirgaon)',
+]
+
+function resolvePromoProduct(rawName = '') {
+  const needle = rawName.trim().toLowerCase()
+  for (const [canonical, data] of Object.entries(PROMO_PRODUCTS)) {
+    if (canonical.toLowerCase() === needle) return { canonical, ...data }
+    if (data.aliases.some(a => a.toLowerCase() === needle)) return { canonical, ...data }
+  }
+  // Fuzzy fallback — partial match on alias words
+  for (const [canonical, data] of Object.entries(PROMO_PRODUCTS)) {
+    if (data.aliases.some(a => needle.includes(a.toLowerCase()) || a.toLowerCase().includes(needle))) {
+      return { canonical, ...data }
+    }
+  }
+  return null
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Step 1: Init — Resolve Product, Fix ICP, Rotate MIDC Hub
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function leadPromoInit(ctx) {
+  const { payload, env } = ctx
+  const rawProductName = (payload.product_name || payload.productName || '').trim()
+
+  if (!rawProductName) throw new Error('Missing required field: product_name')
+
+  const product = resolvePromoProduct(rawProductName)
+  if (!product) {
+    throw new Error(
+      `Unknown promo product: "${rawProductName}". Valid options: ${Object.keys(PROMO_PRODUCTS).join(', ')}`
+    )
+  }
+
+  // Rotate MIDC hub and sector using workflow run id, same pattern as standard pipeline
+  const runId   = ctx.workflow_run_id || crypto.randomUUID()
+  const seed    = parseInt(runId.replace(/-/g, '').slice(0, 8), 16) || 0
+  const hub     = MIDC_HUBS[seed % MIDC_HUBS.length]
+  const sector  = PROMO_SECTORS[Math.floor(seed / MIDC_HUBS.length) % PROMO_SECTORS.length]
+
+  console.log(`[lead_promo_init] product=${product.canonical} hub=${hub} sector=${sector.name}`)
+
+  await nextJob(ctx, 'lead_promo_tavily_find_buyers', {
+    ...payload,
+    selected_product:   product.canonical,
+    product_pitch:       product.pitch,
+    product_use_case:    product.use_case,
+    location:             `${hub}, Maharashtra, India`,
+    midc_hub:             hub,
+    selected_industry:    sector.name,
+    sector_search_terms:  sector.terms,
+    icp: {
+      business_size: 'Medium to large enterprises with significant industrial product requirements',
+      geography:     `Maharashtra MIDC — focus on ${hub} and nearby industrial clusters`,
+      purchase_intent: 'Regular, recurring bulk orders with potential for long-term supply contracts',
+      sectors:       PROMO_SECTORS.map(s => s.name),
+    },
+  })
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Step 2: Tavily — Find Buyer Companies in MIDC Hub
+// Scoped tightly to sector + MIDC hub + bulk/recurring purchase signals
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function leadPromoTavilyFindBuyers(ctx) {
+  const { payload, env } = ctx
+  const hub          = payload.midc_hub          || 'Pune MIDC'
+  const sectorName    = payload.selected_industry || 'Manufacturing & Engineering'
+  const sectorTerms   = payload.sector_search_terms || ['industrial manufacturer']
+  const product       = payload.selected_product   || 'Industrial Fasteners'
+  const useCase        = payload.product_use_case   || ''
+
+  // Targeted queries: sector + MIDC hub + bulk procurement intent
+  const queries = [
+    `${sectorTerms[0]} "${hub}" Maharashtra official website`,
+    `${sectorTerms[1] || sectorTerms[0]} ${hub} bulk fastener procurement supplier`,
+    `medium large manufacturer ${hub} ${sectorName} contact`,
+  ]
+
+  const allResults = []
+  for (const query of queries) {
+    try {
+      const result = await tavilySearch(env, query, 'basic', 6)
+      allResults.push(...(result.results || []))
+    } catch (e) {
+      console.warn(`[lead_promo_tavily_find_buyers] query failed: ${e.message}`)
+    }
+  }
+
+  const seen      = new Set()
+  const companies = []
+
+  for (const r of allResults) {
+    const domain = cleanDomain(r.url)
+    if (!domain || seen.has(domain)) continue
+    if ([...SKIP_DOMAINS].some(skip => domain.includes(skip))) continue
+    seen.add(domain)
+    companies.push({
+      company_name: (r.title || domain)
+        .replace(/ [-|·–—].*$/, '')
+        .replace(/\s+(India|Pvt|Ltd|Private|Limited|Inc|Corp|LLP).*$/i, '')
+        .trim()
+        .slice(0, 80),
+      website:      `https://${domain}`,
+      description:  (r.content || '').slice(0, 400),
+      domain,
+    })
+    if (companies.length >= 3) break
+  }
+
+  if (!companies.length) {
+    throw new Error(`No buyer companies found in ${hub} for ${product}`)
+  }
+
+  // Pick the best-fit company using CF AI — emphasise bulk/recurring/medium-large fit
+  const pickPrompt = `Stellar Global Supplies sells ${product} (${useCase}) to industrial buyers in Maharashtra's MIDC belt.
+
+Target ICP:
+- Medium to large enterprises (not small workshops or traders)
+- Sectors: Manufacturing, Automotive, Aerospace, Construction, Engineering
+- Located in or near ${hub}
+- Likely to place regular, recurring BULK orders — not one-off purchases
+- Good candidate for a long-term supply partnership
+
+Companies found:
+${companies.map((c, i) => `${i+1}. ${c.company_name} (${c.domain})\n   ${c.description.slice(0, 200)}`).join('\n\n')}
+
+Pick the company that BEST fits the ICP above. Prefer companies that:
+- Are manufacturers/OEMs/fabricators (not dealers, distributors, or staffing agencies)
+- Show signs of scale (medium/large operation, not a tiny workshop)
+- Would plausibly need ${product} in volume, recurring
+
+Return JSON:
+{
+  "selected_index": 0,
+  "confidence":     "high | medium | low",
+  "reason":         "one sentence why this company fits the bulk/recurring ICP"
+}`
+
+  let selectedIdx = 0
+  try {
+    const pick = await cfAiExtractJson(env, pickPrompt,
+      'Pick the best B2B lead matching a medium-to-large recurring-bulk-buyer ICP. Return JSON only.', 220)
+    selectedIdx = Math.min(parseInt(pick.selected_index) || 0, companies.length - 1)
+    console.log(`[lead_promo_tavily_find_buyers] picked idx=${selectedIdx} confidence=${pick.confidence} reason=${pick.reason}`)
+  } catch (e) {
+    console.warn(`[lead_promo_tavily_find_buyers] company selection failed, using first result: ${e.message}`)
+  }
+
+  const company = companies[selectedIdx]
+  console.log(`[lead_promo_tavily_find_buyers] selected=${company.company_name} domain=${company.domain} hub=${hub}`)
+
+  await nextJob(ctx, 'lead_promo_extract_company', {
+    ...payload,
+    company,
+    companies,
+  })
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Step 3: CF AI — Extract Structured Company Data
+// Same shape as standard leadCfExtractCompany but frames description/why_prospect
+// around bulk/recurring purchase fit and MIDC context, then rejoins the
+// standard pipeline at lead_check_duplicate.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function leadPromoExtractCompany(ctx) {
+  const { payload, env } = ctx
+  const company  = payload.company || payload.companies?.[0] || {}
+  const hub       = payload.midc_hub          || 'Maharashtra MIDC'
+  const sector    = payload.selected_industry || ''
+  const product   = payload.selected_product  || ''
+  const useCase   = payload.product_use_case  || ''
+
+  if (!company.company_name) throw new Error('No company data to extract')
+
+  const prompt = `Extract structured B2B lead data for Stellar Global Supplies (industrial fastener supply company, Pune, India).
+
+Company info found:
+- Name: ${company.company_name}
+- Website: ${company.website}
+- Domain: ${company.domain}
+- Description: ${company.description}
+- MIDC hub context: ${hub}
+- Sector context: ${sector}
+- Target product: ${product} (${useCase})
+
+Target ICP: medium to large enterprise, recurring bulk buyer, long-term supply partnership potential.
+
+Extract and return JSON:
+{
+  "company_name":  "official full company name",
+  "website":       "${company.website}",
+  "domain":        "${company.domain}",
+  "industry":      "${sector}",
+  "country":       "India",
+  "address":       "city/MIDC area and state if found in description, else '${hub}'",
+  "description":   "2-3 sentence description of what this company does and its scale (medium/large)",
+  "why_prospect":  "one line: why this is a good fit for recurring bulk orders of ${product}"
+}`
+
+  const extracted = await cfAiExtractJson(env, prompt,
+    'Extract structured B2B lead data for a medium-to-large recurring-bulk-buyer ICP. Be accurate — only use what is in the source. Return JSON only.', 500)
+
+  console.log(`[lead_promo_extract_company] company=${extracted.company_name} product=${product}`)
+
+  // Rejoin the standard pipeline — same shape as leadCfExtractCompany's output
+  await nextJob(ctx, 'lead_check_duplicate', {
+    ...payload,
+    lead: {
+      ...extracted,
+      source: 'tavily_search_promo',
+    },
+  })
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Step 3: Groq — Extract Structured Company Data
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function leadGroqExtractCompany(ctx) {
+export async function leadCfExtractCompany(ctx) {
   const { payload, env } = ctx
   const company   = payload.company || payload.companies?.[0] || {}
   const location  = payload.location || 'India'
@@ -318,10 +572,10 @@ Extract and return JSON:
   "why_prospect":  "one line: specific product from Stellar they would need and why"
 }`
 
-  const extracted = await groqJson(env, prompt,
+  const extracted = await cfAiExtractJson(env, prompt,
     'Extract structured B2B lead data. Be accurate — only use what is in the source. Return JSON only.', 500)
 
-  console.log(`[lead_groq_extract_company] company=${extracted.company_name}`)
+  console.log(`[lead_cf_extract_company] company=${extracted.company_name}`)
 
   await nextJob(ctx, 'lead_check_duplicate', {
     ...payload,
@@ -444,7 +698,7 @@ export async function leadTavilyScrapeWebsite(ctx) {
 
   console.log(`[lead_tavily_scrape_website] scraped ${scrapedContent.length} chars from ${lead.website}`)
 
-  await nextJob(ctx, 'lead_groq_extract_email', { ...payload, scrapedContent })
+  await nextJob(ctx, 'lead_cf_extract_email', { ...payload, scrapedContent })
 }
 
 
@@ -453,7 +707,7 @@ export async function leadTavilyScrapeWebsite(ctx) {
 // Strict fallback chain — never invents Gmail/Yahoo addresses
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function leadGroqExtractEmail(ctx) {
+export async function leadCfExtractEmail(ctx) {
   const { payload, env } = ctx
   const lead           = payload.lead           || {}
   const contacts       = payload.contacts       || []
@@ -473,7 +727,7 @@ export async function leadGroqExtractEmail(ctx) {
     )
   )].slice(0, 5)
 
-  console.log(`[lead_groq_extract_email] regex found emails: ${foundEmails.join(', ') || 'none'}`)
+  console.log(`[lead_cf_extract_email] regex found emails: ${foundEmails.join(', ') || 'none'}`)
 
   const prompt = `You are a B2B sales intelligence AI for Stellar Global Supplies.
 
@@ -516,7 +770,7 @@ Return JSON:
   "confidence":   "high | medium | low"
 }`
 
-  const result = await groqJson(env, prompt,
+  const result = await cfAiExtractJson(env, prompt,
     'Extract B2B contact info. NEVER use Gmail/Yahoo/Hotmail. Return JSON only.', 500)
 
   const email      = (result.email || '').toLowerCase().trim()
@@ -539,7 +793,7 @@ Return JSON:
     needs_review: needsReview,
   }
 
-  console.log(`[lead_groq_extract_email] email=${email || 'NONE'} source=${result.source} confidence=${result.confidence}`)
+  console.log(`[lead_cf_extract_email] email=${email || 'NONE'} source=${result.source} confidence=${result.confidence}`)
 
   await nextJob(ctx, 'lead_save', { ...payload, lead: enrichedLead, skipEmail: needsReview })
 }
@@ -604,7 +858,7 @@ export async function leadSave(ctx) {
 // Highly personalised — references the specific product they'd buy
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function leadGenBedrockDraftEmail(ctx) {
+export async function leadGenCfDraftEmail(ctx) {
   const { payload, env } = ctx
   const lead            = payload.lead            || {}
   const leadId          = payload.leadId          || lead.id
@@ -658,7 +912,7 @@ Reference specific products, grades, and applications relevant to the recipient'
 Be direct and professional. Never use "I hope this email finds you well."
 Return valid JSON only.`
 
-  const draft = await bedrockGenerateJson(env, prompt, SYSTEM, 1200)
+  const draft = await cfAiGenerateJson(env, prompt, SYSTEM, 1200)
 
   console.log(`[lead_gen_draft_email] drafted subject="${draft.subject}" for leadId=${leadId}`)
 

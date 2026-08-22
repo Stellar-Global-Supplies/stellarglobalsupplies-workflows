@@ -10,7 +10,7 @@
 import { getD1 }     from './lib/d1.js'
 import {
   socialGetOrders,
-  socialBedrockGeneratePost,
+  socialCfGeneratePost,
   socialImageSubmit,
   socialPostToPlatforms,
   socialGetTechContext,
@@ -20,7 +20,7 @@ import {
 import { nowIso }    from './lib/utils.js'
 import {
   paymentFetchOverdue,
-  paymentBedrockDraftEmail,
+  paymentCfDraftEmail,
   paymentApprovalGate,
   paymentSendEmail,
 } from './steps/payment-followup.js'
@@ -32,22 +32,25 @@ import {
 } from './steps/blog-post.js'
 import {
   leadLoadExisting,
-  leadBedrockDraftEmail as leadEmailBedrockDraftEmail,
+  leadCfDraftEmail as leadEmailCfDraftEmail,
   leadApprovalGate as leadEmailApprovalGate,
   leadSendEmail as leadEmailSendEmail,
 } from './steps/lead-email.js'
 import {
   leadSelectProductAndIndustry,
   leadTavilyFindBuyers,
-  leadGroqExtractCompany,
+  leadCfExtractCompany,
   leadCheckDuplicate,
   leadTavilyFindContact,
   leadTavilyScrapeWebsite,
-  leadGroqExtractEmail,
+  leadCfExtractEmail,
   leadSave,
-  leadGenBedrockDraftEmail,
+  leadGenCfDraftEmail,
   leadGenApprovalGate,
   leadGenSendEmail,
+  leadPromoInit,
+  leadPromoTavilyFindBuyers,
+  leadPromoExtractCompany,
 } from './steps/lead-gen.js'
 import {
   curRunForwarder,
@@ -287,25 +290,31 @@ const STEP_HANDLERS = {
   // ── Lead Generation ────────────────────────────────────────── LIVE ✓ ──
   lead_select_product_and_industry: (ctx) => leadSelectProductAndIndustry(ctx),
   lead_tavily_find_buyers:          (ctx) => leadTavilyFindBuyers(ctx),
-  lead_groq_extract_company:   (ctx) => leadGroqExtractCompany(ctx),
+  lead_groq_extract_company:   (ctx) => leadCfExtractCompany(ctx),
   lead_check_duplicate:        (ctx) => leadCheckDuplicate(ctx),
   lead_tavily_find_contact:    (ctx) => leadTavilyFindContact(ctx),
   lead_tavily_scrape_website:  (ctx) => leadTavilyScrapeWebsite(ctx),
-  lead_groq_extract_email:     (ctx) => leadGroqExtractEmail(ctx),
+  lead_groq_extract_email:     (ctx) => leadCfExtractEmail(ctx),
   lead_save:                   (ctx) => leadSave(ctx),
-  lead_gen_draft_email:        (ctx) => leadGenBedrockDraftEmail(ctx),
+  lead_gen_draft_email:        (ctx) => leadGenCfDraftEmail(ctx),
   lead_gen_approval_gate:      (ctx) => leadGenApprovalGate(ctx),
   lead_gen_send_email:         (ctx) => leadGenSendEmail(ctx),
 
+  // ── Lead Generation — Promo Product (fasteners, MIDC ICP) ───── LIVE ✓ ──
+  lead_promo_init:                  (ctx) => leadPromoInit(ctx),
+  lead_promo_tavily_find_buyers:    (ctx) => leadPromoTavilyFindBuyers(ctx),
+  lead_promo_extract_company:       (ctx) => leadPromoExtractCompany(ctx),
+  // rejoins standard pipeline at lead_check_duplicate onward (handlers above)
+
   // ── Lead Email Existing ────────────────────────────────────── LIVE ✓ ──
   lead_load_existing:          (ctx) => leadLoadExisting(ctx),
-  lead_email_draft_email:      (ctx) => leadEmailBedrockDraftEmail(ctx),
+  lead_email_draft_email:      (ctx) => leadEmailCfDraftEmail(ctx),
   lead_approval_gate:          (ctx) => leadEmailApprovalGate(ctx),
   lead_send_email:             (ctx) => leadEmailSendEmail(ctx),
 
   // ── Social Product ─────────────────────────────────────────── LIVE ✓ ──
   social_get_orders:            (ctx) => socialGetOrders(ctx),
-  social_bedrock_generate_post: (ctx) => socialBedrockGeneratePost(ctx),
+  social_bedrock_generate_post: (ctx) => socialCfGeneratePost(ctx),
   social_image_submit:          (ctx) => socialImageSubmit(ctx),
   social_post_to_platforms:     (ctx) => socialPostToPlatforms(ctx),
 
@@ -324,7 +333,7 @@ const STEP_HANDLERS = {
 
   // ── Payment Followup ─────────────────────────────────────────── LIVE ✓ ──
   payment_fetch_overdue:       (ctx) => paymentFetchOverdue(ctx),
-  payment_bedrock_draft_email: (ctx) => paymentBedrockDraftEmail(ctx),
+  payment_cf_draft_email:      (ctx) => paymentCfDraftEmail(ctx),
   payment_approval_gate:       (ctx) => paymentApprovalGate(ctx),
   payment_send_email:          (ctx) => paymentSendEmail(ctx),
 

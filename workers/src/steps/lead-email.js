@@ -4,17 +4,17 @@
  *
  * Steps:
  *   lead_load_existing         → fetch lead from Supabase by ID
- *   lead_bedrock_draft_email   → Bedrock drafts personalised outreach email
+ *   lead_cf_draft_email        → CF Workers AI drafts personalised outreach email
  *   lead_send_email            → send via Gmail OAuth, update lead status
  *
  * Required secrets on stellar-job-runner:
  *   SUPABASE_URL, SUPABASE_SERVICE_KEY
- *   BEDROCK_ACCESS_KEY_ID, BEDROCK_SECRET_ACCESS_KEY, BEDROCK_REGION
+ *   (no external AI credentials needed — uses CF Workers AI binding)
  *   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN
  *   SENDER_EMAIL
  */
 
-import { bedrockGenerateJson } from '../lib/bedrock.js'
+import { cfAiGenerateJson } from '../lib/cf-ai.js'
 import { getClient }           from '../lib/supabase.js'
 import { nowIso }              from '../lib/utils.js'
 import { nextJob, insertApprovalGate } from '../job-runner.js'
@@ -60,11 +60,11 @@ export async function leadLoadExisting(ctx) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 2: Draft Email with Bedrock
+// Step 2: Draft Email with CF Workers AI
 // Ports: draft_email.py
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function leadBedrockDraftEmail(ctx) {
+export async function leadCfDraftEmail(ctx) {
   const { payload, env } = ctx
   const lead = payload.lead || {}
   if (!lead.id || !lead.company_name) throw new Error('Missing lead data in payload')
@@ -91,8 +91,8 @@ Return JSON with exactly these fields:
   "body": "full email body with proper greeting, value proposition, CTA, and signature from ${SENDER_NAME}"
 }`
 
-  const draft = await bedrockGenerateJson(env, prompt, BEDROCK_SYSTEM, 1500)
-  console.log(`[lead_bedrock_draft_email] drafted for lead=${lead.id} company=${lead.company_name}`)
+  const draft = await cfAiGenerateJson(env, prompt, BEDROCK_SYSTEM, 1500)
+  console.log(`[lead_cf_draft_email] drafted for lead=${lead.id} company=${lead.company_name}`)
 
   await nextJob(ctx, 'lead_approval_gate', {
     lead,

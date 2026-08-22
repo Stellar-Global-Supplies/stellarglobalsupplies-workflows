@@ -12,7 +12,7 @@ import { getClient }           from './lib/supabase.js'
 import { getD1 }               from './lib/d1.js'
 import { ok, err, preflight, nowIso, buildCron } from './lib/utils.js'
 import { readJson }             from './lib/assets.js'
-import { bedrockGenerateJson } from './lib/bedrock.js'
+import { cfAiGenerateJson } from './lib/cf-ai.js'
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -90,7 +90,7 @@ export default {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const VALID_WORKFLOW_TYPES = [
-  'lead-generation', 'lead-email-existing', 'social-product',
+  'lead-generation', 'lead-generation-promo', 'lead-email-existing', 'social-product',
   'social-tech', 'blog', 'payment-followup',
   'cur-forwarder', 'postgres-forwarder', 'ai-sync', 's3-cleanup', 'brevo-sync',
   'brevo-campaign',
@@ -98,6 +98,7 @@ const VALID_WORKFLOW_TYPES = [
 
 const FIRST_STEP = {
   'lead-generation':    'lead_select_product_and_industry',
+  'lead-generation-promo': 'lead_promo_init',
   'lead-email-existing':'lead_load_existing',
   'social-product':     'social_get_orders',
   'social-tech':        'social_get_tech_context',
@@ -350,7 +351,7 @@ Rewrite the social media post based on reviewer feedback.
 Return ONLY valid JSON with keys: linkedin, facebook, instagram.
 LinkedIn: 1500+ chars, structured paragraphs. Facebook/Instagram: under 300 chars with 3-5 hashtags.`
 
-    const regen = await bedrockGenerateJson(env, prompt, system, 3000)
+    const regen = await cfAiGenerateJson(env, prompt, system, 3000)
     await d1.update('approval_queue',
       { payload: { ...payload, post: { ...post, ...regen } } },
       { id: approvalId }
@@ -370,7 +371,7 @@ Return JSON: { "title": "...", "excerpt": "...", "content": "full markdown..." }
 Rewrite the blog post based on reviewer feedback.
 Return ONLY valid JSON with keys: title, excerpt, content (full markdown).`
 
-    const regen = await bedrockGenerateJson(env, prompt, system, 4000)
+    const regen = await cfAiGenerateJson(env, prompt, system, 4000)
     await d1.update('approval_queue',
       { payload: { ...payload, blog: { ...blog, ...regen } } },
       { id: approvalId }
@@ -629,7 +630,7 @@ async function handleDataAction(path, request, sb, d1) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const VALID_SCHEDULE_TYPES = [
-  'lead-generation','lead-email-existing','social-product','social-tech','blog',
+  'lead-generation','lead-generation-promo','lead-email-existing','social-product','social-tech','blog',
   'cur-forwarder','postgres-forwarder','ai-sync','s3-cleanup','brevo-sync',
   'brevo-campaign',
 ]
@@ -639,6 +640,21 @@ function validateWorkflowInput(wfType, body) {
     case 'lead-generation':
       if (!body.location) return 'Missing required field: location'
       break
+    case 'lead-generation-promo': {
+      const productName = (body.product_name || body.productName || '').trim().toLowerCase()
+      if (!productName) return 'Missing required field: product_name'
+      const PROMO_ALIASES = {
+        'MS Nylock Nuts':     ['ms nylock nuts', 'nylock nuts', 'nylon insert lock nuts'],
+        'Nord-Lock Washers':  ['nord-lock washers', 'nordlock washers', 'wedge locking washers'],
+        'Internal Circlips':  ['internal circlips', 'internal circlips din 472', 'retaining rings internal'],
+        'External Circlips':  ['external circlips', 'external circlips din 471', 'retaining rings external'],
+      }
+      const isKnown = Object.values(PROMO_ALIASES).some(aliases => aliases.includes(productName))
+      if (!isKnown) {
+        return `product_name must match one of: ${Object.keys(PROMO_ALIASES).join(', ')} (common aliases accepted)`
+      }
+      break
+    }
     case 'lead-email-existing':
       if (!body.leadId && !body.lead_id) return 'Missing required field: leadId'
       break

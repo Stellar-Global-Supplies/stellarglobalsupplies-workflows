@@ -5,16 +5,16 @@
  *
  * Steps:
  *   payment_fetch_overdue        → fetch orders from Supabase
- *   payment_bedrock_draft_email  → Bedrock drafts email
+ *   payment_cf_draft_email       → CF Workers AI drafts email
  *   payment_approval_gate        → insert approval_queue row, pause
  *   payment_send_email           → send via Gmail OAuth (triggered on approve)
  *
  * Required secrets on stellar-job-runner Worker:
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY
- *   BEDROCK_ACCESS_KEY_ID
- *   BEDROCK_SECRET_ACCESS_KEY
- *   BEDROCK_REGION
+ *   (no external AI credentials needed
+ *   uses CF Workers AI binding)
+ *   
  *   GMAIL_CLIENT_ID
  *   GMAIL_CLIENT_SECRET
  *   GMAIL_REFRESH_TOKEN
@@ -23,7 +23,7 @@
  *   API_BASE_URL               https://stellarglobalsupplies-workflows.workwithprasadbhavsar.workers.dev
  */
 
-import { bedrockGenerateJson } from '../lib/bedrock.js'
+import { cfAiGenerateJson } from '../lib/cf-ai.js'
 import { getClient }           from '../lib/supabase.js'
 import { nowIso }              from '../lib/utils.js'
 import { nextJob, insertApprovalGate } from '../job-runner.js'
@@ -73,7 +73,7 @@ export async function paymentFetchOverdue(ctx) {
     }
 
     console.log(`[payment_fetch_overdue] single order=${orderId} customer=${order.customer_name}`)
-    await nextJob(ctx, 'payment_bedrock_draft_email', { order, orderId: order.id, isBatch: false })
+    await nextJob(ctx, 'payment_cf_draft_email', { order, orderId: order.id, isBatch: false })
     return
   }
 
@@ -97,7 +97,7 @@ export async function paymentFetchOverdue(ctx) {
       id:              crypto.randomUUID(),
       workflow_run_id,
       workflow_type,
-      step_name:       'payment_bedrock_draft_email',
+      step_name:       'payment_cf_draft_email',
       status:          'pending',
       payload:         { ...payload, order, orderId: order.id, isBatch: true },
       retry_count:     0,
@@ -108,11 +108,11 @@ export async function paymentFetchOverdue(ctx) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 2: Draft Email with Bedrock
+// Step 2: Draft Email with CF Workers AI
 // Mirrors: draft_payment_email.py
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function paymentBedrockDraftEmail(ctx) {
+export async function paymentCfDraftEmail(ctx) {
   const { payload, env } = ctx
   const order = payload.order || {}
 
@@ -157,9 +157,9 @@ Return JSON with exactly these fields:
   "body": "full professional email body with all order details, amount breakdown, and polite payment request"
 }`
 
-  const draft = await bedrockGenerateJson(env, prompt, BEDROCK_SYSTEM, 1500)
+  const draft = await cfAiGenerateJson(env, prompt, BEDROCK_SYSTEM, 1500)
 
-  console.log(`[payment_bedrock_draft_email] drafted for order=${order.id} customer=${order.customer_name} total=${fmt(total)}`)
+  console.log(`[payment_cf_draft_email] drafted for order=${order.id} customer=${order.customer_name} total=${fmt(total)}`)
 
   await nextJob(ctx, 'payment_approval_gate', {
     emailDraft: {
