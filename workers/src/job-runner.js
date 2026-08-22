@@ -12,6 +12,7 @@ import {
   socialGetOrders,
   socialCfGeneratePost,
   socialImageSubmit,
+  socialImagePoll,
   socialPostToPlatforms,
   socialGetTechContext,
   socialTechGeneratePost,
@@ -290,11 +291,11 @@ const STEP_HANDLERS = {
   // ── Lead Generation ────────────────────────────────────────── LIVE ✓ ──
   lead_select_product_and_industry: (ctx) => leadSelectProductAndIndustry(ctx),
   lead_tavily_find_buyers:          (ctx) => leadTavilyFindBuyers(ctx),
-  lead_groq_extract_company:   (ctx) => leadCfExtractCompany(ctx),
+  lead_cf_extract_company:     (ctx) => leadCfExtractCompany(ctx),
   lead_check_duplicate:        (ctx) => leadCheckDuplicate(ctx),
   lead_tavily_find_contact:    (ctx) => leadTavilyFindContact(ctx),
   lead_tavily_scrape_website:  (ctx) => leadTavilyScrapeWebsite(ctx),
-  lead_groq_extract_email:     (ctx) => leadCfExtractEmail(ctx),
+  lead_cf_extract_email:       (ctx) => leadCfExtractEmail(ctx),
   lead_save:                   (ctx) => leadSave(ctx),
   lead_gen_draft_email:        (ctx) => leadGenCfDraftEmail(ctx),
   lead_gen_approval_gate:      (ctx) => leadGenApprovalGate(ctx),
@@ -314,8 +315,9 @@ const STEP_HANDLERS = {
 
   // ── Social Product ─────────────────────────────────────────── LIVE ✓ ──
   social_get_orders:            (ctx) => socialGetOrders(ctx),
-  social_bedrock_generate_post: (ctx) => socialCfGeneratePost(ctx),
+  social_cf_generate_post:      (ctx) => socialCfGeneratePost(ctx),
   social_image_submit:          (ctx) => socialImageSubmit(ctx),
+  social_image_poll:            (ctx) => socialImagePoll(ctx),
   social_post_to_platforms:     (ctx) => socialPostToPlatforms(ctx),
 
   // ── Social Tech ─────────────────────────────────────────────── LIVE ✓ ──
