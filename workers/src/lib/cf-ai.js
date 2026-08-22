@@ -61,7 +61,15 @@ async function cfAiInvoke(env, prompt, system, maxTokens, jsonMode = false) {
   const model  = pickModel(maxTokens)
   const result = await env.AI.run(model, params)
 
-  const text = result?.response ?? result?.result?.response ?? ''
+  let text = result?.response ?? result?.result?.response
+
+  // Workers AI can return an already-parsed object/array when
+  // response_format: json_object is set (varies by model version).
+  // Normalize everything down to a string so downstream parsing is uniform.
+  if (text != null && typeof text !== 'string') {
+    text = JSON.stringify(text)
+  }
+
   if (!text) throw new Error(`CF Workers AI (${model}) returned empty response`)
   return text
 }
@@ -73,7 +81,10 @@ async function cfAiInvoke(env, prompt, system, maxTokens, jsonMode = false) {
  * Applies the same multi-stage fallback JSON extraction logic.
  */
 export async function cfAiGenerateJson(env, prompt, system = '', maxTokens = 2000) {
-  const text = await cfAiInvoke(env, prompt, system, maxTokens, true)
+  const raw = await cfAiInvoke(env, prompt, system, maxTokens, true)
+
+  // Defensive: cfAiInvoke should always return a string, but guard anyway
+  const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
 
   // 1. Strip markdown code fences if present
   let clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
