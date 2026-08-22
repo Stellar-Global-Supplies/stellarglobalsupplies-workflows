@@ -26,7 +26,7 @@
  *       Nordlock Washers, Hex Bolts, Allen Bolts, Lock Nuts, Washers, Dowel Pins
  */
 
-import { bedrockGenerateJson, bedrockGenerateText } from '../lib/bedrock.js'
+import { cfAiGenerateJson, cfAiGenerateText } from '../lib/cf-ai.js'
 import { getClient }                                from '../lib/supabase.js'
 import { uploadImage, imageExtAndType }             from '../lib/assets.js'
 import { generateAndUploadImage }                   from '../lib/image-gen.js'
@@ -338,7 +338,7 @@ Return JSON:
   "product_page_url": "${productUrl}"
 }`
 
-  const outline = await bedrockGenerateJson(env, prompt, SYSTEM, 1000)
+  const outline = await cfAiGenerateJson(env, prompt, SYSTEM, 1000)
   console.log(`[blog_generate_outline] title="${outline.title}"`)
 
   await nextJob(ctx, 'blog_generate_content', {
@@ -410,7 +410,7 @@ Return JSON:
   "word_count_estimate": 900
 }`
 
-  const result  = await bedrockGenerateJson(env, prompt, SYSTEM, 4000)
+  const result  = await cfAiGenerateJson(env, prompt, SYSTEM, 4000)
   const content = result.content || ''
 
   console.log(`[blog_generate_content] generated ~${result.word_count_estimate || '?'} words`)
@@ -669,7 +669,7 @@ Rules:
 Output ONLY the prompt text — no preamble, no quotes`
 
   try {
-    return (await bedrockGenerateText(env, instruction, '', 150))
+    return (await cfAiGenerateText(env, instruction, '', 150))
       .trim().replace(/^"|"$/g, '')
   } catch {
     return `Realistic DSLR editorial photograph of ${product} in a professional industrial setting, natural lighting, sharp focus on product, photorealistic, no text`

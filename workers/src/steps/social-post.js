@@ -22,7 +22,7 @@
  *   IG_ACCESS_TOKEN
  */
 
-import { bedrockGenerateJson, bedrockGenerateText } from '../lib/bedrock.js'
+import { cfAiGenerateJson, cfAiGenerateText } from '../lib/cf-ai.js'
 import { getClient }                                from '../lib/supabase.js'
 import { uploadImage, imageExtAndType }             from '../lib/assets.js'
 import { generateAndUploadImage }                   from '../lib/image-gen.js'
@@ -211,7 +211,7 @@ export async function socialGetOrders(ctx) {
 
   console.log(`[social_get_orders] selected order=${order.id} product="${productName}" category="${productCategory}"`)
 
-  await nextJob(ctx, 'social_bedrock_generate_post', {
+  await nextJob(ctx, 'social_cf_generate_post', {
     order:     sanitisedOrder,
     orderId:   String(order.id || ''),
     post_type: postType,
@@ -277,7 +277,7 @@ export async function socialGetTechContext(ctx) {
 // Mirrors: generate_post.py handler()
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function socialBedrockGeneratePost(ctx) {
+export async function socialCfGeneratePost(ctx) {
   const { payload, env } = ctx
   const sb         = getClient(env)
   const postType   = payload.post_type || payload.type || 'product'
@@ -293,7 +293,7 @@ export async function socialBedrockGeneratePost(ctx) {
       `order_id=eq.${encodeURIComponent(payload.orderId)}&type=eq.product&limit=1`
     )
     if (existing.length) {
-      console.log(`[social_bedrock_generate_post] duplicate product post — skipping`)
+      console.log(`[social_cf_generate_post] duplicate product post — skipping`)
       if (ctx.workflow_run_id) {
         await ctx.d1.update('workflow_runs', {
           status:       'stopped',
@@ -311,7 +311,7 @@ export async function socialBedrockGeneratePost(ctx) {
       `repo_name=eq.${encodeURIComponent(repoName)}&type=eq.tech&limit=1`
     )
     if (existing.length) {
-      console.log(`[social_bedrock_generate_post] duplicate tech post — skipping`)
+      console.log(`[social_cf_generate_post] duplicate tech post — skipping`)
       return // marks current job done, chain ends
     }
   }
@@ -367,8 +367,8 @@ Return JSON with these exact keys:
 }`
   }
 
-  const contentData = await bedrockGenerateJson(env, genPrompt, SYSTEM, 3000)
-  console.log(`[social_bedrock_generate_post] generated title=${contentData.title}`)
+  const contentData = await cfAiGenerateJson(env, genPrompt, SYSTEM, 3000)
+  console.log(`[social_cf_generate_post] generated title=${contentData.title}`)
 
   const title   = contentData.title || ''
   const summary = contentData.facebook || (contentData.linkedin || '').slice(0, 300)
@@ -389,7 +389,7 @@ Rules:
 Output ONLY the prompt text — no explanation, no quotes, no preamble`
 
     try {
-      imgPrompt = (await bedrockGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
     } catch (e) {
       imgPrompt = `Realistic DSLR commercial photography of ${order.product_name} in a professional industrial setting, natural lighting, sharp focus, photorealistic editorial`
     }
@@ -404,7 +404,7 @@ Rules: realistic DSLR, natural office lighting, navy and gold UI on screen, shal
 Output ONLY the prompt — no explanation, no quotes`
 
     try {
-      imgPrompt = (await bedrockGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
     } catch (e) {
       imgPrompt = `Realistic DSLR photo of a procurement professional reviewing a B2B supply chain dashboard, navy and gold UI, natural lighting, industrial supply catalogue on desk, shallow depth of field, photorealistic`
     }
@@ -444,7 +444,7 @@ Output ONLY the prompt — no explanation, no quotes`
   }
 
   const saved = await sb.insert('social_posts', row)
-  console.log(`[social_bedrock_generate_post] saved postId=${saved.id}`)
+  console.log(`[social_cf_generate_post] saved postId=${saved.id}`)
 
   await nextJob(ctx, 'social_image_submit', {
     postId:       saved.id,
@@ -538,7 +538,7 @@ Return JSON with these exact keys:
   "hashtags": ["B2BSupplyChain", "IndustrialSupply", "SteelSupplier", "Procurement", "StellarGlobalSupplies", "MadeInIndia", "B2BIndia"]
 }`
 
-  const contentData = await bedrockGenerateJson(env, genPrompt, TECH_SYSTEM, 3000)
+  const contentData = await cfAiGenerateJson(env, genPrompt, TECH_SYSTEM, 3000)
   console.log(`[social_tech_generate_post] title="${contentData.title}"`)
 
   const title      = contentData.title || topicName

@@ -6,7 +6,7 @@ import {
   CalendarClock, Plus, Pencil, Trash2, Power, PowerOff,
   Users, Share2, Code2, FileText, ChevronDown, ChevronUp,
   Clock, Calendar, Facebook, Instagram, Linkedin,
-  BarChart3, Database, Brain, Cloud, Mail
+  BarChart3, Database, Brain, Cloud, Mail, Target
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -20,7 +20,15 @@ const WORKFLOW_TYPES = [
     icon: Users,
     color: 'bg-blue-50 text-blue-700 border-blue-200',
     iconBg: 'bg-blue-600',
-    description: 'Tavily finds real companies · Groq extracts contacts · Bedrock drafts email · Gmail sends outreach',
+    description: 'Tavily finds real companies · CF Workers AI extracts contacts & drafts email · Gmail sends outreach',
+  },
+  {
+    key: 'lead-generation-promo',
+    label: 'Lead Gen — Promo Product',
+    icon: Target,
+    color: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+    iconBg: 'bg-cyan-600',
+    description: 'Pick a fastener product → fixed MIDC/medium-large ICP → Tavily finds bulk buyers → AI drafts email',
   },
   {
     key: 'social-product',
@@ -111,6 +119,8 @@ function defaultParams(workflowType) {
   switch (workflowType) {
     case 'lead-generation':
       return { location: '' }
+    case 'lead-generation-promo':
+      return { product_name: 'MS Nylock Nuts' }
     case 'social-product':
       return { prompt: '', platforms: { facebook: true, instagram: true, linkedin: true } }
     case 'social-tech':
@@ -172,6 +182,28 @@ function WorkflowParamForm({ workflowType, params, onChange }) {
       <FormField label="Location" hint="City, state, or country to find buyer companies in">
         <input value={params.location || ''} onChange={e => set('location', e.target.value)}
           className="input" placeholder="e.g. Pune, Mumbai, Chennai, Ahmedabad…" />
+      </FormField>
+    </div>
+  )
+
+  if (workflowType === 'lead-generation-promo') return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-400 -mt-1">
+        Fixed target: medium-to-large manufacturing/automotive/aerospace/construction/engineering
+        companies across Maharashtra MIDC hubs, seeking recurring bulk orders.
+      </p>
+      <FormField label="Product" hint="Which fastener/locking product to target">
+        <div className="flex gap-1.5 flex-wrap">
+          {['MS Nylock Nuts', 'Nord-Lock Washers', 'Internal Circlips', 'External Circlips'].map(p => (
+            <button key={p} type="button" onClick={() => set('product_name', p)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                ${(params.product_name || 'MS Nylock Nuts') === p
+                  ? 'bg-navy text-white border-navy'
+                  : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+              {p}
+            </button>
+          ))}
+        </div>
       </FormField>
     </div>
   )
@@ -435,6 +467,8 @@ function ScheduleCard({ schedule, onEdit, onDelete, onToggle }) {
     switch (schedule.workflow_type) {
       case 'lead-generation':
         return p.location || '—'
+      case 'lead-generation-promo':
+        return p.product_name || 'MS Nylock Nuts'
       case 'social-product':
         return [
           p.prompt && `prompt: ${p.prompt}`,
@@ -527,6 +561,13 @@ function ExpandedParams({ schedule }) {
   if (schedule.workflow_type === 'lead-generation') return (
     <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
       <div className="col-span-2"><dt className="text-slate-400 text-xs">Location</dt><dd className="text-navy font-medium">{p.location || '—'}</dd></div>
+    </dl>
+  )
+
+  if (schedule.workflow_type === 'lead-generation-promo') return (
+    <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+      <div className="col-span-2"><dt className="text-slate-400 text-xs">Product</dt><dd className="text-navy font-medium">{p.product_name || 'MS Nylock Nuts'}</dd></div>
+      <div className="col-span-2"><dt className="text-slate-400 text-xs">Target ICP</dt><dd className="text-navy text-xs">Medium/large manufacturers · Maharashtra MIDC · recurring bulk orders</dd></div>
     </dl>
   )
 

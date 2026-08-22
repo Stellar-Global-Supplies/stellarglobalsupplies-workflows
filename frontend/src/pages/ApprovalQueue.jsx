@@ -13,6 +13,8 @@ import { formatDistanceToNow } from 'date-fns'
 const WF_META = {
   lead_approval:       { label: 'Lead Approval',     icon: Users,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
   lead_generation:     { label: 'Lead Generation',   icon: Users,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  'lead-generation':   { label: 'Lead Generation',   icon: Users,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  'lead-generation-promo': { label: 'Lead Gen — Promo', icon: Users,   color: 'text-cyan-600',    bg: 'bg-cyan-50' },
   lead_email:          { label: 'Email Outreach',    icon: Mail,       color: 'text-blue-600',    bg: 'bg-blue-50' },
   lead_email_existing: { label: 'Email Outreach',    icon: Mail,       color: 'text-blue-600',    bg: 'bg-blue-50' },
   lead_followup:       { label: 'Follow-up Email',   icon: Mail,       color: 'text-indigo-600',  bg: 'bg-indigo-50' },
@@ -367,7 +369,7 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
   const isPublishGate = gate === 'publish'
   const isSocialPost   = ['social_product','social_tech'].includes(item.workflow_type)
   const isBlog         = item.workflow_type === 'blog'
-  const isLeadApproval = ['lead_approval','lead_generation'].includes(item.workflow_type)
+  const isLeadApproval = ['lead_approval','lead_generation','lead-generation','lead-generation-promo'].includes(item.workflow_type)
   const isLeadEmail    = ['lead_email','lead_email_existing','lead_followup'].includes(item.workflow_type)
   const isPayment      = item.workflow_type === 'payment_followup'
 
