@@ -23,7 +23,7 @@
  *   API_BASE_URL               https://stellarglobalsupplies-workflows.workwithprasadbhavsar.workers.dev
  */
 
-import { cfAiGenerateJson } from '../lib/cf-ai.js'
+import { cfAiExtractJsonStrict } from '../lib/cf-ai.js'
 import { getClient }           from '../lib/supabase.js'
 import { nowIso }              from '../lib/utils.js'
 import { nextJob, insertApprovalGate } from '../job-runner.js'
@@ -157,7 +157,14 @@ Return JSON with exactly these fields:
   "body": "full professional email body with all order details, amount breakdown, and polite payment request"
 }`
 
-  const draft = await cfAiGenerateJson(env, prompt, BEDROCK_SYSTEM, 1500)
+  const draft = await cfAiExtractJsonStrict(env, prompt, BEDROCK_SYSTEM, {
+    type: 'object',
+    properties: {
+      subject: { type: 'string' },
+      body:    { type: 'string' },
+    },
+    required: ['subject', 'body'],
+  }, 1500)
 
   console.log(`[payment_cf_draft_email] drafted for order=${order.id} customer=${order.customer_name} total=${fmt(total)}`)
 
@@ -209,7 +216,7 @@ export async function paymentApprovalGate(ctx) {
   }
 
   // Build preview HTML for dashboard
-  const bodyPreview = (emailDraft.body || '').slice(0, 600)
+  const bodyPreview = emailDraft.body || ''
   const previewHtml = `
     <div style="font-family:Arial,sans-serif;max-width:600px">
       <h2 style="color:#0A2547">Payment Follow-up — ${order.customer_name || ''}</h2>
@@ -218,7 +225,7 @@ export async function paymentApprovalGate(ctx) {
         <p><strong>Subject:</strong> ${emailDraft.subject || ''}</p>
         <p><strong>Total Payable:</strong> ₹${parseFloat(emailDraft.total_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
         <hr style="border:none;border-top:1px solid #E2E8F0"/>
-        <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}${bodyPreview.length === 600 ? '...' : ''}</div>
+        <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}</div>
       </div>
     </div>`
 
@@ -378,7 +385,7 @@ async function sendViaGmail(accessToken, to, subject, html, sender) {
 
 async function sendApprovalNotification(env, { to, approvalId, emailToken, approveUrl, rejectUrl, order, emailDraft, senderEmail }) {
   const customer    = order.customer_name || ''
-  const bodyPreview = (emailDraft.body || '').slice(0, 600)
+  const bodyPreview = emailDraft.body || ''
   const total       = parseFloat(emailDraft.total_payable || 0)
     .toLocaleString('en-IN', { minimumFractionDigits: 2 })
 
@@ -411,7 +418,7 @@ async function sendApprovalNotification(env, { to, approvalId, emailToken, appro
               <p><strong>To:</strong> ${emailDraft.to || ''}</p>
               <p><strong>Subject:</strong> ${emailDraft.subject || ''}</p>
               <hr style="border:none;border-top:1px solid #E2E8F0;margin:12px 0"/>
-              <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}${bodyPreview.length === 600 ? '...' : ''}</div>
+              <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}</div>
             </div>
           </td>
         </tr>

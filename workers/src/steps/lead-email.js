@@ -14,7 +14,7 @@
  *   SENDER_EMAIL
  */
 
-import { cfAiGenerateJson } from '../lib/cf-ai.js'
+import { cfAiExtractJsonStrict } from '../lib/cf-ai.js'
 import { getClient }           from '../lib/supabase.js'
 import { nowIso }              from '../lib/utils.js'
 import { nextJob, insertApprovalGate } from '../job-runner.js'
@@ -91,7 +91,14 @@ Return JSON with exactly these fields:
   "body": "full email body with proper greeting, value proposition, CTA, and signature from ${SENDER_NAME}"
 }`
 
-  const draft = await cfAiGenerateJson(env, prompt, BEDROCK_SYSTEM, 1500)
+  const draft = await cfAiExtractJsonStrict(env, prompt, BEDROCK_SYSTEM, {
+    type: 'object',
+    properties: {
+      subject: { type: 'string' },
+      body:    { type: 'string' },
+    },
+    required: ['subject', 'body'],
+  }, 1500)
   console.log(`[lead_cf_draft_email] drafted for lead=${lead.id} company=${lead.company_name}`)
 
   await nextJob(ctx, 'lead_approval_gate', {
@@ -125,7 +132,7 @@ export async function leadApprovalGate(ctx) {
         <p><strong>To:</strong> ${lead.email || ''}</p>
         <p><strong>Subject:</strong> ${emailDraft.subject || ''}</p>
         <hr style="border:none;border-top:1px solid #E2E8F0"/>
-        <div style="white-space:pre-wrap;font-size:13px">${(emailDraft.body || '').slice(0, 600)}...</div>
+        <div style="white-space:pre-wrap;font-size:13px">${emailDraft.body || ''}</div>
       </div>
     </div>`
 
@@ -275,7 +282,7 @@ async function sendViaGmail(accessToken, to, subject, html, sender) {
 async function sendLeadApprovalNotification(env, { to, approvalId, emailToken, approveUrl, rejectUrl, lead, emailDraft, senderEmail }) {
   const companyName = lead.company_name || ''
   const contactName = lead.contact_name || ''
-  const bodyPreview = (emailDraft.body || '').slice(0, 600)
+  const bodyPreview = emailDraft.body || ''
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
@@ -308,7 +315,7 @@ async function sendLeadApprovalNotification(env, { to, approvalId, emailToken, a
               <p><strong>Website:</strong> ${lead.website || ''}</p>
               <hr style="border:none;border-top:1px solid #E2E8F0;margin:12px 0"/>
               <p><strong>Email Subject:</strong> ${emailDraft.subject || ''}</p>
-              <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}${bodyPreview.length === 600 ? '...' : ''}</div>
+              <div style="white-space:pre-wrap;font-size:13px">${bodyPreview}</div>
             </div>
           </td>
         </tr>

@@ -89,32 +89,79 @@ export async function cfAiGenerateJson(env, prompt, system = '', maxTokens = 200
   // Defensive: cfAiInvoke should always return a string, but guard anyway
   const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
 
-  // 1. Strip markdown code fences if present
-  let clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+  // 0. Models sometimes ignore json_object mode and wrap the JSON in a
+  //    conversational preamble + markdown fence, e.g.
+  //    "Here is the email:\n```json\n{...}\n```"
+  //    If a fenced block exists ANYWHERE in the text, prefer its contents
+  //    over the raw text (the old regex only stripped a fence at the very
+  //    start/end, which misses this preamble case entirely).
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  let clean = (fenced ? fenced[1] : text)
+    .replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
 
-  // 2. Direct parse
+  // 1. Direct parse
   try { return JSON.parse(clean) } catch {}
 
-  // 3. Extract first complete JSON object or array
-  const objMatch = clean.match(/(\{[\s\S]*\}|\[[\s\S]*\])/)
+  // 2. Repair common non-JSON artifacts: models frequently emit *literal*
+  //    newlines/tabs inside string values (e.g. an email body written as
+  //    real line breaks) instead of escaping them as \n — that's invalid
+  //    JSON and JSON.parse rejects it outright. Escape raw control chars
+  //    that fall inside quoted strings, then retry.
+  const repaired = repairJsonControlChars(clean)
+  try { return JSON.parse(repaired) } catch {}
+
+  // 3. Extract first complete JSON object or array, then repair + parse
+  const objMatch = repaired.match(/(\{[\s\S]*\}|\[[\s\S]*\])/)
   if (objMatch) {
     try { return JSON.parse(objMatch[1]) } catch {}
   }
 
   // 4. Last resort — brace scan
-  const firstBrace = clean.indexOf('{')
-  const lastBrace  = clean.lastIndexOf('}')
-  const firstBrack = clean.indexOf('[')
-  const lastBrack  = clean.lastIndexOf(']')
+  const firstBrace = repaired.indexOf('{')
+  const lastBrace  = repaired.lastIndexOf('}')
+  const firstBrack = repaired.indexOf('[')
+  const lastBrack  = repaired.lastIndexOf(']')
 
   if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try { return JSON.parse(clean.slice(firstBrace, lastBrace + 1)) } catch {}
+    try { return JSON.parse(repaired.slice(firstBrace, lastBrace + 1)) } catch {}
   }
   if (firstBrack !== -1 && lastBrack > firstBrack) {
-    try { return JSON.parse(clean.slice(firstBrack, lastBrack + 1)) } catch {}
+    try { return JSON.parse(repaired.slice(firstBrack, lastBrack + 1)) } catch {}
   }
 
   throw new Error(`Invalid JSON from CF Workers AI: ${text.slice(0, 300)}...`)
+}
+
+/**
+ * Escape raw control characters (newline, carriage return, tab) that occur
+ * INSIDE quoted JSON string values. Walks the text tracking quote/escape
+ * state so it doesn't touch whitespace used for JSON formatting outside
+ * strings (which is harmless either way, but this keeps the diff minimal).
+ */
+function repairJsonControlChars(text) {
+  let out = ''
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) {
+        out += ch
+        escaped = false
+        continue
+      }
+      if (ch === '\\') { out += ch; escaped = true; continue }
+      if (ch === '"')  { out += ch; inString = false; continue }
+      if (ch === '\n') { out += '\\n'; continue }
+      if (ch === '\r') { out += '\\r'; continue }
+      if (ch === '\t') { out += '\\t'; continue }
+      out += ch
+    } else {
+      if (ch === '"') inString = true
+      out += ch
+    }
+  }
+  return out
 }
 
 /**
@@ -152,7 +199,7 @@ export async function cfAiExtractJson(env, prompt, system = '', maxTokens = 800)
 export async function cfAiExtractJsonStrict(env, prompt, system, schema, maxTokens = 800) {
   if (!env.AI) throw new Error('CF Workers AI binding (AI) not found in env')
 
-  const tokens = Math.min(maxTokens, 1200)
+  const tokens = Math.min(maxTokens, 2000)
   const messages = []
   if (system) messages.push({ role: 'system', content: system })
   messages.push({ role: 'user', content: prompt })
@@ -169,8 +216,12 @@ export async function cfAiExtractJsonStrict(env, prompt, system, schema, maxToke
     if (text != null && typeof text !== 'string') return text // already parsed object
     if (!text) throw new Error('empty response in schema mode')
 
-    const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
-    return JSON.parse(clean)
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+    const clean  = (fenced ? fenced[1] : text)
+      .replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+
+    try { return JSON.parse(clean) } catch {}
+    return JSON.parse(repairJsonControlChars(clean))
   } catch (e) {
     console.warn(`[cfAiExtractJsonStrict] schema mode failed (${e.message}), falling back to json_object mode`)
     return cfAiExtractJson(env, prompt, system, maxTokens)
