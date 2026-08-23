@@ -241,7 +241,10 @@ async function doApprove(d1, item, approvalId, note, edits, now, env) {
   const wfType  = item.workflow_type   || ''
   const runId   = item.workflow_run_id || payload.workflowRunId
 
-  if (edits) await persistEdits(d1, item, edits)
+  // persistEdits merges edits into the stored payload and returns the merged
+  // version — use that (not the stale `payload` above) for anything queued
+  // next, or edited content silently reverts to the original AI draft.
+  const merged = (edits && Object.keys(edits).length) ? await persistEdits(d1, item, edits) : payload
 
   if (!runId) {
     console.warn(`[doApprove] approvalId=${approvalId} approved but no runId — workflow not updated`)
@@ -254,12 +257,12 @@ async function doApprove(d1, item, approvalId, note, edits, now, env) {
       workflow_type:   wfType,
       step_name:       'payment_send_email',
       status:          'pending',
-      payload:         { ...payload, approvalId, ...(edits.email || {}) },
+      payload:         { ...merged, approvalId },
       retry_count:     0,
       created_at:      now,
     })
   } else if (gate === 'save') {
-    const nextStep = payload._nextStep
+    const nextStep = merged._nextStep
     if (nextStep) {
       await d1.insert('job_queue', {
         id:              crypto.randomUUID(),
@@ -267,13 +270,13 @@ async function doApprove(d1, item, approvalId, note, edits, now, env) {
         workflow_type:   wfType,
         step_name:       nextStep,
         status:          'pending',
-        payload:         { ...payload, approved: true, reviewNote: note },
+        payload:         { ...merged, approved: true, reviewNote: note },
         retry_count:     0,
         created_at:      now,
       })
     }
   } else if (gate === 'publish') {
-    const postId = payload.postId || payload.post?.id
+    const postId = merged.postId || merged.post?.id
     if (!postId) return err('Cannot publish — no postId in payload')
     await d1.insert('job_queue', {
       id:              crypto.randomUUID(),
@@ -281,7 +284,7 @@ async function doApprove(d1, item, approvalId, note, edits, now, env) {
       workflow_type:   wfType,
       step_name:       'social_post_to_platforms',
       status:          'pending',
-      payload:         { ...payload, postId },
+      payload:         { ...merged, postId },
       retry_count:     0,
       created_at:      now,
     })
@@ -427,7 +430,15 @@ async function persistEdits(d1, item, edits) {
   for (const key of ['post','blog','email']) {
     if (edits[key] && merged[key]) merged[key] = { ...merged[key], ...edits[key] }
   }
+  // Lead flows (lead-gen.js, lead-email.js) store the AI draft under
+  // `emailDraft`, not `email` — but the frontend's EmailEditor always submits
+  // edits under `edits.email` regardless of which key the source came from.
+  // Without this, edits to a lead outreach email were silently discarded.
+  if (edits.email && merged.emailDraft) {
+    merged.emailDraft = { ...merged.emailDraft, ...edits.email }
+  }
   await d1.update('approval_queue', { payload: merged }, { id: item.id })
+  return merged
 }
 
 

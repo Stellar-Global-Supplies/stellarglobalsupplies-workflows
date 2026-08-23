@@ -928,7 +928,14 @@ Reference specific products, grades, and applications relevant to the recipient'
 Be direct and professional. Never use "I hope this email finds you well."
 Return valid JSON only.`
 
-  const draft = await cfAiGenerateJson(env, prompt, SYSTEM, 1200)
+  const draft = await cfAiExtractJsonStrict(env, prompt, SYSTEM, {
+    type: 'object',
+    properties: {
+      subject: { type: 'string' },
+      body:    { type: 'string' },
+    },
+    required: ['subject', 'body'],
+  }, 1200)
 
   console.log(`[lead_gen_draft_email] drafted subject="${draft.subject}" for leadId=${leadId}`)
 
@@ -990,7 +997,7 @@ export async function leadGenApprovalGate(ctx) {
         <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase">Outreach Email Draft</p>
         <p style="margin:10px 0 4px"><strong>Subject:</strong> ${emailDraft.subject || ''}</p>
         <div style="white-space:pre-wrap;font-size:13px;color:#334155;margin-top:8px;line-height:1.6">
-          ${(emailDraft.body || '').slice(0, 600)}${(emailDraft.body || '').length > 600 ? '...' : ''}
+          ${emailDraft.body || ''}
         </div>
       </div>
     </div>`
@@ -1152,7 +1159,7 @@ function buildEmailHtml(subject, body, sender) {
 }
 
 async function sendLeadApprovalEmail(env, { to, senderEmail, approvalId, approveUrl, rejectUrl, dashUrl, lead, emailDraft, product }) {
-  const bodyPreview = (emailDraft.body || '').slice(0, 500)
+  const bodyPreview = emailDraft.body || ''
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif">
@@ -1198,7 +1205,7 @@ async function sendLeadApprovalEmail(env, { to, senderEmail, approvalId, approve
         <p style="margin:0 0 8px;font-size:12px;font-weight:600;color:#64748b">OUTREACH EMAIL DRAFT</p>
         <p style="margin:0 0 6px;font-size:13px"><strong>Subject:</strong> ${emailDraft.subject || ''}</p>
         <div style="white-space:pre-wrap;font-size:13px;color:#334155;line-height:1.6;margin-top:8px">
-          ${bodyPreview}${bodyPreview.length >= 500 ? '...' : ''}
+          ${bodyPreview}
         </div>
       </div>
     </td>
