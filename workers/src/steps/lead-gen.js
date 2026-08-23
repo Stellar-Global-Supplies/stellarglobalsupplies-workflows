@@ -43,7 +43,7 @@
  * (AI inference uses CF Workers AI binding — no Bedrock/Groq keys needed)
  */
 
-import { cfAiGenerateJson, cfAiExtractJson } from '../lib/cf-ai.js'
+import { cfAiGenerateJson, cfAiExtractJson, cfAiExtractJsonStrict } from '../lib/cf-ai.js'
 import { getClient }                         from '../lib/supabase.js'
 import { nowIso }                            from '../lib/utils.js'
 import { nextJob, insertApprovalGate }       from '../job-runner.js'
@@ -770,8 +770,24 @@ Return JSON:
   "confidence":   "high | medium | low"
 }`
 
-  const result = await cfAiExtractJson(env, prompt,
-    'Extract B2B contact info. NEVER use Gmail/Yahoo/Hotmail. Return JSON only.', 500)
+  const emailSchema = {
+    type: 'object',
+    properties: {
+      email:        { type: 'string' },
+      contact_name: { type: 'string' },
+      contact_role: { type: 'string' },
+      phone:        { type: 'string' },
+      needs_review: { type: 'boolean' },
+      source:       { type: 'string', enum: ['found_on_website', 'found_in_search', 'guessed_from_name', 'fallback_procurement', 'needs_review'] },
+      confidence:   { type: 'string', enum: ['high', 'medium', 'low'] },
+    },
+    required: ['email', 'contact_name', 'contact_role', 'phone', 'needs_review', 'source', 'confidence'],
+  }
+
+  const result = await cfAiExtractJsonStrict(env, prompt,
+    'Extract B2B contact info. NEVER use Gmail/Yahoo/Hotmail. Return JSON only.', emailSchema, 500)
+
+  console.log(`[lead_cf_extract_email] raw result: ${JSON.stringify(result).slice(0, 500)}`)
 
   const email      = (result.email || '').toLowerCase().trim()
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
