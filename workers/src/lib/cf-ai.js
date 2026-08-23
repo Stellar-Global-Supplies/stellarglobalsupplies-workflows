@@ -5,9 +5,12 @@
  * No external HTTP calls, no AWS credentials, no API keys needed.
  *
  * Models chosen by use-case:
- *   @cf/meta/llama-3.3-70b-instruct-fp8-fast
+ *   @cf/meta/llama-3.1-70b-instruct
  *     → fast structured JSON tasks: extraction, classification, short drafts
- *     → same Llama 3.3 70B architecture as the Groq model being replaced
+ *     → full-precision (not fp8-quantized) — 2026-08-23: switched off the
+ *       fp8-fast quantized 3.3 variant, which was unreliable on multi-step
+ *       conditional prompts (e.g. the email-extraction fallback chain),
+ *       causing empty email/phone fields on otherwise-successful scrapes.
  *
  *   @cf/meta/llama-4-scout-17b-16e-instruct
  *     → long-form generation: blog content (up to 4 000 tokens output),
@@ -18,7 +21,7 @@
 // ── Model selection ───────────────────────────────────────────────────────────
 
 /** Fast model — structured JSON extraction / short outputs (≤ 1 200 tokens) */
-const MODEL_FAST = '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+const MODEL_FAST = '@cf/meta/llama-3.1-70b-instruct'
 
 /** Long-form model — creative / long outputs (> 1 200 tokens) */
 const MODEL_LONG = '@cf/meta/llama-4-scout-17b-16e-instruct'
@@ -129,4 +132,47 @@ export async function cfAiExtractJson(env, prompt, system = '', maxTokens = 800)
   // Cap to fast-model range so pickModel() always chooses MODEL_FAST
   const tokens = Math.min(maxTokens, 1200)
   return cfAiGenerateJson(env, prompt, system, tokens)
+}
+
+/**
+ * Generate JSON constrained to an exact schema, using Workers AI's
+ * `response_format: { type: 'json_schema' }` mode (stricter than json_object —
+ * required fields are enforced server-side; the model can't silently omit them).
+ *
+ * Falls back to the regular cfAiExtractJson() (json_object mode + regex/brace
+ * parsing) if schema mode isn't supported for the model or errors out, so this
+ * is safe to introduce without risking a hard failure on calls that used to work.
+ *
+ * @param {object} env
+ * @param {string} prompt
+ * @param {string} system
+ * @param {object} schema     - JSON Schema object with "properties"/"required"
+ * @param {number} maxTokens
+ */
+export async function cfAiExtractJsonStrict(env, prompt, system, schema, maxTokens = 800) {
+  if (!env.AI) throw new Error('CF Workers AI binding (AI) not found in env')
+
+  const tokens = Math.min(maxTokens, 1200)
+  const messages = []
+  if (system) messages.push({ role: 'system', content: system })
+  messages.push({ role: 'user', content: prompt })
+
+  try {
+    const result = await env.AI.run(MODEL_FAST, {
+      messages,
+      max_tokens: tokens,
+      temperature: 0.2,
+      response_format: { type: 'json_schema', json_schema: schema },
+    })
+
+    let text = result?.response ?? result?.result?.response
+    if (text != null && typeof text !== 'string') return text // already parsed object
+    if (!text) throw new Error('empty response in schema mode')
+
+    const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+    return JSON.parse(clean)
+  } catch (e) {
+    console.warn(`[cfAiExtractJsonStrict] schema mode failed (${e.message}), falling back to json_object mode`)
+    return cfAiExtractJson(env, prompt, system, maxTokens)
+  }
 }
