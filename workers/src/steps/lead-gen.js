@@ -22,9 +22,8 @@
  *   lead_tavily_find_buyers           → Tavily finds real companies buying that product
  *   lead_cf_extract_company           → CF AI extracts structured company data
  *   lead_check_duplicate              → skip if already in DB
- *   lead_tavily_find_contact          → Tavily finds procurement/purchase decision maker
- *   lead_tavily_scrape_website        → Tavily scrapes website for email/phone
- *   lead_cf_extract_email             → CF AI extracts best email with fallback chain
+ *   lead_tavily_scrape_website        → Tavily /extract fetches real site pages, regex-pulls emails
+ *   lead_cf_extract_email             → picks best on-site email, or falls back to purchase@domain
  *   lead_save                         → save to Supabase
  *   lead_gen_draft_email              → CF AI drafts product-specific outreach
  *   lead_gen_approval_gate            → email notification + dashboard approval
@@ -634,182 +633,170 @@ export async function leadCheckDuplicate(ctx) {
   }
 
   console.log(`[lead_check_duplicate] no duplicate — continuing`)
-  await nextJob(ctx, 'lead_tavily_find_contact', { ...payload })
+  await nextJob(ctx, 'lead_tavily_scrape_website', { ...payload })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 5: Tavily — Find Procurement Contact
-// 1 Tavily credit — targeted at procurement/purchase decision maker
+// Step 5: Tavily — Scrape Company Website for Email
+// Uses Tavily's /extract endpoint (fetches real page content, not search
+// snippets) against the homepage + likely contact/about pages, then
+// regex-pulls every email found on those pages.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function leadTavilyFindContact(ctx) {
-  const { payload, env } = ctx
-  const lead    = payload.lead    || {}
-  const company = lead.company_name || ''
-  const domain  = lead.domain || cleanDomain(lead.website || '')
+async function tavilyExtract(env, urls) {
+  const apiKey = await resolveSecret(env.TAVILY_API_KEY)
+  if (!apiKey) throw new Error('Missing secret: TAVILY_API_KEY')
 
-  // Targeted: find procurement/purchase person at this specific company
-  const query = `"${company}" procurement purchase manager director contact${domain ? ` site:${domain} OR site:linkedin.com` : ''}`
-
-  let contacts = []
-  try {
-    const result = await tavilySearch(env, query, 'basic', 5)
-    contacts = (result.results || []).slice(0, 5).map(r => ({
-      title:   r.title   || '',
-      content: r.content || '',
-      url:     r.url     || '',
-    }))
-  } catch (e) {
-    console.warn(`[lead_tavily_find_contact] search failed: ${e.message}`)
-  }
-
-  console.log(`[lead_tavily_find_contact] found ${contacts.length} contact results`)
-
-  await nextJob(ctx, 'lead_tavily_scrape_website', { ...payload, contacts })
+  const res = await fetch(`${TAVILY_BASE}/extract`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ api_key: apiKey, urls }),
+  })
+  if (!res.ok) throw new Error(`Tavily extract ${res.status}: ${await res.text()}`)
+  return res.json()
 }
 
+const EMAIL_REGEX = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Step 6: Tavily — Scrape Company Website
-// 1 Tavily credit — scrapes contact/about page for email/phone
-// ═══════════════════════════════════════════════════════════════════════════
+function extractEmailsFromText(text, domain) {
+  return [...new Set((text.match(EMAIL_REGEX) || [])
+    .map(e => e.toLowerCase())
+    .filter(e =>
+      !e.includes('sentry') && !e.includes('example') && !e.includes('noreply') &&
+      !e.includes('@gmail') && !e.includes('@yahoo') && !e.includes('@hotmail') && !e.includes('@outlook') &&
+      // .png/.jpg etc sometimes get matched off image filenames like logo@2x.png — drop those
+      !/\.(png|jpe?g|gif|svg|webp)$/i.test(e) &&
+      (domain ? e.endsWith(`@${domain}`) || e.endsWith(domain) : true)
+    )
+  )]
+}
 
 export async function leadTavilyScrapeWebsite(ctx) {
   const { payload, env } = ctx
-  const lead     = payload.lead    || {}
-  const contacts = payload.contacts || []
+  const lead   = payload.lead || {}
+  const domain = lead.domain || cleanDomain(lead.website || '')
 
   let scrapedContent = ''
+  let foundEmails    = []
+
   if (lead.website) {
+    const base = lead.website.replace(/\/$/, '')
+    const candidateUrls = [
+      base,
+      `${base}/contact`,
+      `${base}/contact-us`,
+      `${base}/about`,
+      `${base}/about-us`,
+    ]
+
     try {
-      const result = await tavilySearch(env,
-        `${lead.website} contact email phone address`,
-        'advanced', 3
-      )
-      scrapedContent = (result.results || [])
-        .map(r => r.content || '')
+      const result = await tavilyExtract(env, candidateUrls)
+      const pages  = (result.results || []).filter(r => r.raw_content)
+
+      scrapedContent = pages
+        .map(r => r.raw_content || '')
         .join('\n')
-        .slice(0, 3000)
+        .slice(0, 6000)
+
+      foundEmails = extractEmailsFromText(scrapedContent, domain)
+
+      console.log(`[lead_tavily_scrape_website] extracted ${pages.length}/${candidateUrls.length} pages, ${scrapedContent.length} chars, emails=${foundEmails.join(', ') || 'none'}`)
+
+      if (result.failed_results?.length) {
+        console.log(`[lead_tavily_scrape_website] failed to fetch: ${result.failed_results.map(f => f.url).join(', ')}`)
+      }
     } catch (e) {
-      console.warn(`[lead_tavily_scrape_website] scrape failed: ${e.message}`)
+      console.warn(`[lead_tavily_scrape_website] extract failed: ${e.message}`)
     }
   }
 
-  console.log(`[lead_tavily_scrape_website] scraped ${scrapedContent.length} chars from ${lead.website}`)
-
-  await nextJob(ctx, 'lead_cf_extract_email', { ...payload, scrapedContent })
+  await nextJob(ctx, 'lead_cf_extract_email', { ...payload, scrapedContent, foundEmails })
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Step 7: Groq — Extract Email + Contact
-// Strict fallback chain — never invents Gmail/Yahoo addresses
+// Step 6: Extract Email from Scraped Site Content
+// Simple and direct: if the site scrape found a real on-domain email, use it.
+// A light CF AI pass only happens when multiple candidates need picking, or
+// to try to spot a contact name near the email for a more personal greeting.
+// No email found → fall back to purchase@domain (never invents gmail/yahoo etc).
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function leadCfExtractEmail(ctx) {
   const { payload, env } = ctx
   const lead           = payload.lead           || {}
-  const contacts       = payload.contacts       || []
   const scrapedContent = payload.scrapedContent || ''
+  const foundEmails    = payload.foundEmails     || []
+  const domain         = lead.domain || cleanDomain(lead.website || '')
 
-  // Pre-extract emails from scraped text using regex
-  const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
-  const domain     = lead.domain || cleanDomain(lead.website || '')
+  let email        = ''
+  let contactName  = ''
+  let source       = 'fallback_purchase'
+  let confidence   = 'low'
+  let needsReview  = false
 
-  const allText    = [scrapedContent, ...contacts.map(c => c.content)].join('\n')
-  const foundEmails = [...new Set((allText.match(emailRegex) || [])
-    .filter(e =>
-      !e.includes('sentry') && !e.includes('example') &&
-      !e.includes('noreply') && !e.includes('@gmail') &&
-      !e.includes('@yahoo') && !e.includes('@hotmail') &&
-      (domain ? e.endsWith(domain) || e.includes(domain.split('.')[0]) : true)
-    )
-  )].slice(0, 5)
+  if (foundEmails.length === 1) {
+    // Single clear match — use it directly, no AI call needed
+    email      = foundEmails[0]
+    source     = 'found_on_website'
+    confidence = 'high'
+  } else if (foundEmails.length > 1) {
+    // Multiple candidates — light AI pass to pick the best one
+    // (prefer purchase/sales/info over role-specific personal-looking ones)
+    try {
+      const pickPrompt = `Website content for ${lead.company_name} (${domain}):
+${scrapedContent.slice(0, 2000)}
 
-  console.log(`[lead_cf_extract_email] regex found emails: ${foundEmails.join(', ') || 'none'}`)
+Emails found on the site: ${foundEmails.join(', ')}
 
-  const prompt = `You are a B2B sales intelligence AI for Stellar Global Supplies.
-
-Company: ${lead.company_name}
-Website: ${lead.website}
-Domain: ${domain}
-Industry: ${lead.industry}
-
-Emails already found by regex: ${foundEmails.join(', ') || 'none'}
-
-Contact search results:
-${contacts.slice(0, 4).map(c => `- ${c.title}\n  ${c.content.slice(0, 300)}`).join('\n\n')}
-
-Scraped website content (first 1500 chars):
-${scrapedContent.slice(0, 1500)}
-
-TASK: Find the best procurement/purchase contact email and name.
-
-STRICT EMAIL RULES — follow this chain in order:
-1. FOUND: Use an email from the regex list above if it belongs to ${domain}
-2. FOUND: Extract any email from the content that belongs to ${domain}
-3. GUESSED: If a person's name is found, guess firstname@${domain || 'domain.com'}
-4. FALLBACK: Use procurement@${domain || 'domain.com'} or purchase@${domain || 'domain.com'}
-5. NEEDS_REVIEW: Only if domain is completely unknown
-
-CRITICAL RULES:
-- NEVER use @gmail.com, @yahoo.com, @hotmail.com, @outlook.com addresses
-- NEVER invent a domain not present in the data above
-- For contact_name: use actual names found, never invent one
-- For phone: extract Indian format numbers (+91 or 0XX) only if clearly present
+Pick the single best email for B2B procurement/sales outreach.
+Prefer generic business addresses (info@, sales@, purchase@, enquiry@, contact@) over personal-looking ones,
+unless a personal one is clearly the owner/director. If a contact person's name appears near an email, extract it.
 
 Return JSON:
 {
-  "email":        "best email following the chain above",
-  "contact_name": "First Last if found, else empty string",
-  "contact_role": "procurement manager | purchase manager | director | CEO | empty string",
-  "phone":        "phone number if clearly found, else empty string",
-  "needs_review": false,
-  "source":       "found_on_website | found_in_search | guessed_from_name | fallback_procurement | needs_review",
-  "confidence":   "high | medium | low"
+  "email":        "the best email from the list above, exactly as given",
+  "contact_name": "First Last if a name appears near that email, else empty string"
 }`
+      const picked = await cfAiExtractJson(env, pickPrompt,
+        'Pick the best business email from a fixed list. Return JSON only.', 200)
 
-  const emailSchema = {
-    type: 'object',
-    properties: {
-      email:        { type: 'string' },
-      contact_name: { type: 'string' },
-      contact_role: { type: 'string' },
-      phone:        { type: 'string' },
-      needs_review: { type: 'boolean' },
-      source:       { type: 'string', enum: ['found_on_website', 'found_in_search', 'guessed_from_name', 'fallback_procurement', 'needs_review'] },
-      confidence:   { type: 'string', enum: ['high', 'medium', 'low'] },
-    },
-    required: ['email', 'contact_name', 'contact_role', 'phone', 'needs_review', 'source', 'confidence'],
+      email       = foundEmails.includes((picked.email || '').toLowerCase())
+        ? picked.email.toLowerCase()
+        : foundEmails[0]
+      contactName = picked.contact_name || ''
+      source      = 'found_on_website'
+      confidence  = 'high'
+    } catch (e) {
+      console.warn(`[lead_cf_extract_email] AI pick failed, using first match: ${e.message}`)
+      email      = foundEmails[0]
+      source     = 'found_on_website'
+      confidence = 'medium'
+    }
+  } else if (domain) {
+    // Nothing found on the site — simple fallback, no guessing personal names
+    email       = `purchase@${domain}`
+    source      = 'fallback_purchase'
+    confidence  = 'low'
+    needsReview = true
+  } else {
+    // No domain at all — can't even build a fallback
+    needsReview = true
   }
-
-  const result = await cfAiExtractJsonStrict(env, prompt,
-    'Extract B2B contact info. NEVER use Gmail/Yahoo/Hotmail. Return JSON only.', emailSchema, 500)
-
-  console.log(`[lead_cf_extract_email] raw result: ${JSON.stringify(result).slice(0, 500)}`)
-
-  const email      = (result.email || '').toLowerCase().trim()
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
-                     !email.endsWith('@gmail.com') &&
-                     !email.endsWith('@yahoo.com') &&
-                     !email.endsWith('@hotmail.com') &&
-                     !email.endsWith('@outlook.com')
-
-  const needsReview = !emailValid || result.needs_review
 
   const enrichedLead = {
     ...lead,
-    email:        emailValid ? email : '',
-    contact_name: result.contact_name  || '',
-    contact_role: result.contact_role  || '',
-    phone:        result.phone         || '',
-    source:       result.source        || 'tavily_search',
-    confidence:   result.confidence    || 'low',
+    email,
+    contact_name: contactName,
+    contact_role: '',
+    phone:        '',
+    source,
+    confidence,
     needs_review: needsReview,
   }
 
-  console.log(`[lead_cf_extract_email] email=${email || 'NONE'} source=${result.source} confidence=${result.confidence}`)
+  console.log(`[lead_cf_extract_email] email=${email || 'NONE'} source=${source} confidence=${confidence} needsReview=${needsReview}`)
 
   await nextJob(ctx, 'lead_save', { ...payload, lead: enrichedLead, skipEmail: needsReview })
 }
