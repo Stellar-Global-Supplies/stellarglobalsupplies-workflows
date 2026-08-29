@@ -210,8 +210,11 @@ export default function SocialMediaPost() {
                     <img src={post.image_url} alt=""
                       className="w-16 h-16 rounded-lg object-cover flex-shrink-0 border border-slate-100" />
                   ) : (
-                    <div className="w-16 h-16 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
-                      <ImgIcon size={20} className="text-slate-300" />
+                    <div
+                      className="w-16 h-16 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0"
+                      title={post.image_error ? `Image generation failed: ${post.image_error}` : 'No image'}
+                    >
+                      <ImgIcon size={20} className={post.image_error ? 'text-red-300' : 'text-slate-300'} />
                     </div>
                   )}
 
