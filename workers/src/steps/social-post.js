@@ -630,8 +630,7 @@ export async function socialTechImageSubmit(ctx) {
 
   const storageKey = `social-posts/tech/${crypto.randomUUID()}`
   const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
-    width:  1024,
-    height: 1024,
+    steps: 8, // max diffusion steps for best quality; width/height aren't accepted by this model's schema
   })
 
   if (postId) {
@@ -738,8 +737,7 @@ export async function socialImageSubmit(ctx) {
   // Workers AI FLUX — synchronous, no polling needed
   const storageKey = `social-posts/${payload.post_type || 'product'}/${crypto.randomUUID()}`
   const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
-    width:  1024,
-    height: 1024,
+    steps: 8, // max diffusion steps for best quality; width/height aren't accepted by this model's schema
   })
 
   // Update social_posts row with image url (or the failure reason) if we have a postId
