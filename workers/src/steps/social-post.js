@@ -388,10 +388,20 @@ Rules:
 - Convey quality, strength, and professional grade
 Output ONLY the prompt text — no explanation, no quotes, no preamble`
 
+    const fallbackImgPrompt = `Realistic DSLR commercial photography of ${order.product_name} in a professional industrial setting, natural lighting, sharp focus, photorealistic editorial`
     try {
-      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"+|"+$/g, '').trim()
     } catch (e) {
-      imgPrompt = `Realistic DSLR commercial photography of ${order.product_name} in a professional industrial setting, natural lighting, sharp focus, photorealistic editorial`
+      imgPrompt = fallbackImgPrompt
+    }
+    // The model can return a response that survives cfAiInvoke's empty-string
+    // check (e.g. a bare `""`, or whitespace) but collapses to nothing once
+    // trimmed/unquoted here. That used to flow through as imgPrompt = "",
+    // which social_image_submit then skipped *silently* — no image, no
+    // error recorded anywhere. Treat it the same as a thrown error.
+    if (!imgPrompt) {
+      console.warn('[social_cf_generate_post] image prompt generation returned empty — using fallback')
+      imgPrompt = fallbackImgPrompt
     }
   } else {
     const ipPrompt = `Write a FLUX image generation prompt (70-90 words) for an editorial photograph showing modern B2B supply chain technology in action.
@@ -403,10 +413,15 @@ Show a laptop in a professional office displaying a supply chain dashboard with 
 Rules: realistic DSLR, natural office lighting, navy and gold UI on screen, shallow depth of field, professional Indian business context.
 Output ONLY the prompt — no explanation, no quotes`
 
+    const fallbackImgPrompt = `Realistic DSLR photo of a procurement professional reviewing a B2B supply chain dashboard, navy and gold UI, natural lighting, industrial supply catalogue on desk, shallow depth of field, photorealistic`
     try {
-      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"+|"+$/g, '').trim()
     } catch (e) {
-      imgPrompt = `Realistic DSLR photo of a procurement professional reviewing a B2B supply chain dashboard, navy and gold UI, natural lighting, industrial supply catalogue on desk, shallow depth of field, photorealistic`
+      imgPrompt = fallbackImgPrompt
+    }
+    if (!imgPrompt) {
+      console.warn('[social_cf_generate_post] tech image prompt generation returned empty — using fallback')
+      imgPrompt = fallbackImgPrompt
     }
   }
 
@@ -441,6 +456,7 @@ Output ONLY the prompt — no explanation, no quotes`
     repo_name:          postType === 'tech' && repoName ? repoName : null,
     prompt:             prompt || null,
     workflow_run_id:    workflowRunId || null,
+    image_prompt:       imgPrompt || null,
   }
 
   const saved = await sb.insert('social_posts', row)
@@ -584,6 +600,12 @@ Visual style:
 - Sharp, photorealistic, no text overlays, no people
 - Convey: modern, reliable, professional B2B technology`
 
+  try {
+    await sb.update('social_posts', { image_prompt: imgPrompt }, `id=eq.${saved.id}`)
+  } catch (e) {
+    console.warn(`[social_tech_generate_post] image_prompt column update failed (non-fatal): ${e.message}`)
+  }
+
   await nextJob(ctx, 'social_tech_image_submit', {
     postId:       saved.id,
     post:         { ...saved, title, content: contentData.facebook || '' },
@@ -612,21 +634,29 @@ export async function socialTechImageSubmit(ctx) {
     height: 1024,
   })
 
-  if (image?.url && postId) {
+  if (postId) {
     try {
       const sb = getClient(env)
-      await sb.update('social_posts', {
-        image_url:    image.url,
-        image_s3_key: image.key,
-      }, `id=eq.${postId}`)
+      await sb.update('social_posts', image?.url
+        ? { image_url: image.url, image_s3_key: image.key, image_error: null }
+        : { image_error: image?.error || 'Unknown image generation failure' },
+      `id=eq.${postId}`)
     } catch (e) {
       console.warn(`[social_tech_image_submit] post update failed (non-fatal): ${e.message}`)
     }
   }
+  if (!image?.url) {
+    console.error(`[social_tech_image_submit] image generation failed postId=${postId}: ${image?.error}`)
+  }
 
   const updatedPayload = image?.url
     ? { ...payload, post: { ...(payload.post || {}), image_url: image.url } }
-    : payload
+    : { ...payload, post: { ...(payload.post || {}), image_error: image?.error } }
+
+  // See note in socialImageSubmit — insertApprovalGate persists ctx.payload,
+  // not the object handed to buildTechApprovalPreview, so it must be
+  // reassigned here or the image is lost from the stored approval JSON.
+  ctx.payload = updatedPayload
 
   await insertApprovalGate(ctx, 'social_post_to_platforms', buildTechApprovalPreview(updatedPayload))
 }
@@ -637,7 +667,7 @@ function buildTechApprovalPreview(payload) {
   const techStack = (payload.techStack || []).slice(0, 6)
   const imageHtml = post.image_url
     ? `<img src="${post.image_url}" style="max-width:100%;border-radius:8px;margin:12px 0 20px"/>`
-    : '<p style="color:#94a3b8;font-size:12px;font-style:italic">Image generating or unavailable</p>'
+    : `<p style="color:#dc2626;font-size:12px;font-style:italic">Image generation failed: ${post.image_error || 'unknown error'}</p>`
 
   return {
     referenceId: payload.postId,
@@ -683,8 +713,23 @@ export async function socialImageSubmit(ctx) {
   const postId    = payload.postId
 
   if (!imgPrompt) {
-    console.log('[social_image_submit] no image prompt — skipping to approval')
-    await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(payload))
+    // This should be rare now that socialCfGeneratePost always falls back to
+    // a template prompt, but if it ever happens again it must be visible —
+    // previously this just logged and silently moved on with no image and
+    // no trace of why.
+    const msg = 'No image prompt was generated for this post'
+    console.error(`[social_image_submit] ${msg} postId=${postId}`)
+    if (postId) {
+      try {
+        const sb = getClient(env)
+        await sb.update('social_posts', { image_error: msg }, `id=eq.${postId}`)
+      } catch (e) {
+        console.warn(`[social_image_submit] post update failed (non-fatal): ${e.message}`)
+      }
+    }
+    const updatedPayload = { ...payload, post: { ...(payload.post || {}), image_error: msg } }
+    ctx.payload = updatedPayload
+    await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
     return
   }
 
@@ -697,22 +742,32 @@ export async function socialImageSubmit(ctx) {
     height: 1024,
   })
 
-  // Update social_posts row with image url if generated
-  if (image?.url && postId) {
+  // Update social_posts row with image url (or the failure reason) if we have a postId
+  if (postId) {
     try {
       const sb = getClient(env)
-      await sb.update('social_posts', {
-        image_url:    image.url,
-        image_s3_key: image.key,
-      }, `id=eq.${postId}`)
+      await sb.update('social_posts', image?.url
+        ? { image_url: image.url, image_s3_key: image.key, image_error: null }
+        : { image_error: image?.error || 'Unknown image generation failure' },
+      `id=eq.${postId}`)
     } catch (e) {
       console.warn(`[social_image_submit] post update failed (non-fatal): ${e.message}`)
     }
   }
+  if (!image?.url) {
+    console.error(`[social_image_submit] image generation failed postId=${postId}: ${image?.error}`)
+  }
 
   const updatedPayload = image?.url
     ? { ...payload, post: { ...(payload.post || {}), image_url: image.url } }
-    : payload
+    : { ...payload, post: { ...(payload.post || {}), image_error: image?.error } }
+
+  // insertApprovalGate reads ctx.payload directly (not the object passed to
+  // buildApprovalPreview) when it writes the approval_queue row — so without
+  // this reassignment the image_url never makes it into the JSON the
+  // frontend reads, even though preview_html and the social_posts row are
+  // both correct. This was the cause of "image missing in approval queue".
+  ctx.payload = updatedPayload
 
   await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
 }
@@ -809,6 +864,10 @@ export async function socialImagePoll(ctx) {
       post: { ...payload.post, image_url: publicUrl },
     }
 
+    // See note in socialImageSubmit — must reassign ctx.payload or the
+    // approval_queue row's stored JSON never gets the image_url.
+    ctx.payload = updatedPayload
+
     await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
 
   } catch (e) {
@@ -832,7 +891,7 @@ function buildApprovalPreview(payload) {
   const postType  = payload.post_type || 'product'
   const imageHtml = post.image_url
     ? `<img src="${post.image_url}" style="max-width:100%;border-radius:8px;margin:12px 0"/>`
-    : '<p style="color:#94a3b8;font-size:12px">Image generating or unavailable</p>'
+    : `<p style="color:#dc2626;font-size:12px">Image generation failed: ${post.image_error || 'unknown error'}</p>`
 
   const preview = `
     <div style="font-family:Arial,sans-serif;max-width:600px">

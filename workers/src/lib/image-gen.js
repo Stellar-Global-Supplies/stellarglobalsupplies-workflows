@@ -40,18 +40,35 @@ export async function generateImage(env, prompt, opts = {}) {
 
 /**
  * Generate image and upload to Supabase Storage.
- * Returns { url, key } or null on any failure (non-fatal — workflow continues).
+ * Non-fatal by design (a missing image should never block the post from
+ * reaching approval) — but unlike before, the failure reason is always
+ * returned to the caller instead of being swallowed, so it can be logged
+ * against the post and shown to whoever is reviewing it.
+ *
+ * Returns { url, key } on success, or { url: null, key: null, error } on
+ * failure. Never throws.
  */
 export async function generateAndUploadImage(env, prompt, storageKey, opts = {}) {
+  let bytes
   try {
-    const bytes     = await generateImage(env, prompt, opts)
+    bytes = await generateImage(env, prompt, opts)
+  } catch (e) {
+    // Distinguish "Workers AI itself failed" from "upload failed" — these
+    // have very different fixes (AI binding/quota vs Supabase bucket/creds).
+    const msg = `Workers AI FLUX call failed: ${e.message}`
+    console.error(`[image-gen] ${msg}`, e.stack || e)
+    return { url: null, key: null, error: msg }
+  }
+
+  try {
     // Workers AI FLUX returns JPEG
     const key       = storageKey.endsWith('.jpg') ? storageKey : storageKey + '.jpg'
     const publicUrl = await uploadImage(env, bytes, key, 'image/jpeg')
     console.log(`[image-gen] uploaded to ${key}`)
     return { url: publicUrl, key }
   } catch (e) {
-    console.warn(`[image-gen] failed (non-fatal): ${e.message}`)
-    return null
+    const msg = `Supabase Storage upload failed: ${e.message}`
+    console.error(`[image-gen] ${msg}`, e.stack || e)
+    return { url: null, key: null, error: msg }
   }
 }

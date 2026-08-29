@@ -135,19 +135,41 @@ const PLATFORM_PREVIEWS = [
   { key: 'instagram', label: 'Instagram', Icon: Instagram, color: 'text-[#E1306C]',  Component: InstagramPreview },
 ]
 
-function SocialPreviewTabs({ post, fullContent }) {
+function SocialPreviewTabs({ post, fullContent, fallbackHtml }) {
   const merged = fullContent ? { ...post, ...fullContent } : post
   const enabledPlatforms = PLATFORM_PREVIEWS.filter(p =>
     merged[p.key] || merged.platforms?.[p.key]
   )
   const [activeTab, setActiveTab] = useState(enabledPlatforms[0]?.key || 'linkedin')
 
-  if (!enabledPlatforms.length) return null
+  // If the payload snapshot has no per-platform text (e.g. a stale approval
+  // row from before an image/content step finished), fall back to the
+  // static preview_html the backend generated instead of rendering nothing.
+  if (!enabledPlatforms.length) {
+    if (fallbackHtml) {
+      return (
+        <div className="p-4 text-sm border border-slate-200 rounded-xl"
+             dangerouslySetInnerHTML={{ __html: fallbackHtml }} />
+      )
+    }
+    return (
+      <div className="p-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-xl">
+        No preview content available for this post yet.
+      </div>
+    )
+  }
   const active = PLATFORM_PREVIEWS.find(p => p.key === activeTab)
   const Preview = active?.Component
 
   return (
     <div>
+      {/* Image — shown above the tabs so it's visible even if payload.image_url
+          lags behind (e.g. an older approval row), falling back to what the
+          backend rendered into preview_html. */}
+      {!merged.image_url && fallbackHtml && /<img /i.test(fallbackHtml) && (
+        <div className="mb-3 border border-slate-200 rounded-xl overflow-hidden"
+             dangerouslySetInnerHTML={{ __html: fallbackHtml.match(/<img[^>]+>/i)?.[0] || '' }} />
+      )}
       {/* Platform tabs */}
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-3">
         {enabledPlatforms.map(({ key, label, Icon, color }) => (
@@ -171,9 +193,19 @@ function SocialPreviewTabs({ post, fullContent }) {
 
 // ─── Blog preview ─────────────────────────────────────────────────────────────
 
-function BlogPreview({ blog, fullContent }) {
+function BlogPreview({ blog, fullContent, fallbackHtml }) {
   const merged = fullContent ? { ...blog, ...fullContent } : blog
   const content = merged.full_content || merged.content || ''
+
+  // No title and no content at all — the payload snapshot has nothing
+  // useful to show. Fall back to the backend's static preview_html rather
+  // than rendering an empty-looking card.
+  if (!merged.title && !content && fallbackHtml) {
+    return (
+      <div className="p-4 text-sm border border-slate-200 rounded-xl"
+           dangerouslySetInnerHTML={{ __html: fallbackHtml }} />
+    )
+  }
 
   // Convert markdown to basic HTML for preview
   const html = content
@@ -437,14 +469,23 @@ function PreviewModal({ item, onClose, onApprove, onReject, loading }) {
         {/* SOCIAL CONTENT */}
         {isSocialPost && post && (
           viewMode === 'preview'
-            ? <SocialPreviewTabs post={post} fullContent={fullContent} />
+            ? <SocialPreviewTabs post={post} fullContent={fullContent} fallbackHtml={item.preview_html} />
             : <SocialEditor post={post} edits={edits} setEdits={setEdits} fullContent={fullContent} />
+        )}
+        {isSocialPost && !post && item.preview_html && (
+          <div className="p-4 text-sm border border-slate-200 rounded-xl"
+               dangerouslySetInnerHTML={{ __html: item.preview_html }} />
+        )}
+        {isSocialPost && !post && !item.preview_html && (
+          <div className="p-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-xl">
+            No preview content available for this post.
+          </div>
         )}
 
         {/* BLOG CONTENT */}
         {isBlog && blog && (
           viewMode === 'preview'
-            ? <BlogPreview blog={blog} fullContent={fullContent} />
+            ? <BlogPreview blog={blog} fullContent={fullContent} fallbackHtml={item.preview_html} />
             : <BlogEditor blog={blog} edits={edits} setEdits={setEdits} fullContent={fullContent} />
         )}
         {isBlog && !blog && item.preview_html && (
