@@ -612,21 +612,29 @@ export async function socialTechImageSubmit(ctx) {
     height: 1024,
   })
 
-  if (image?.url && postId) {
+  if (postId) {
     try {
       const sb = getClient(env)
-      await sb.update('social_posts', {
-        image_url:    image.url,
-        image_s3_key: image.key,
-      }, `id=eq.${postId}`)
+      await sb.update('social_posts', image?.url
+        ? { image_url: image.url, image_s3_key: image.key, image_error: null }
+        : { image_error: image?.error || 'Unknown image generation failure' },
+      `id=eq.${postId}`)
     } catch (e) {
       console.warn(`[social_tech_image_submit] post update failed (non-fatal): ${e.message}`)
     }
   }
+  if (!image?.url) {
+    console.error(`[social_tech_image_submit] image generation failed postId=${postId}: ${image?.error}`)
+  }
 
   const updatedPayload = image?.url
     ? { ...payload, post: { ...(payload.post || {}), image_url: image.url } }
-    : payload
+    : { ...payload, post: { ...(payload.post || {}), image_error: image?.error } }
+
+  // See note in socialImageSubmit — insertApprovalGate persists ctx.payload,
+  // not the object handed to buildTechApprovalPreview, so it must be
+  // reassigned here or the image is lost from the stored approval JSON.
+  ctx.payload = updatedPayload
 
   await insertApprovalGate(ctx, 'social_post_to_platforms', buildTechApprovalPreview(updatedPayload))
 }
@@ -637,7 +645,7 @@ function buildTechApprovalPreview(payload) {
   const techStack = (payload.techStack || []).slice(0, 6)
   const imageHtml = post.image_url
     ? `<img src="${post.image_url}" style="max-width:100%;border-radius:8px;margin:12px 0 20px"/>`
-    : '<p style="color:#94a3b8;font-size:12px;font-style:italic">Image generating or unavailable</p>'
+    : `<p style="color:#dc2626;font-size:12px;font-style:italic">Image generation failed: ${post.image_error || 'unknown error'}</p>`
 
   return {
     referenceId: payload.postId,
@@ -697,22 +705,32 @@ export async function socialImageSubmit(ctx) {
     height: 1024,
   })
 
-  // Update social_posts row with image url if generated
-  if (image?.url && postId) {
+  // Update social_posts row with image url (or the failure reason) if we have a postId
+  if (postId) {
     try {
       const sb = getClient(env)
-      await sb.update('social_posts', {
-        image_url:    image.url,
-        image_s3_key: image.key,
-      }, `id=eq.${postId}`)
+      await sb.update('social_posts', image?.url
+        ? { image_url: image.url, image_s3_key: image.key, image_error: null }
+        : { image_error: image?.error || 'Unknown image generation failure' },
+      `id=eq.${postId}`)
     } catch (e) {
       console.warn(`[social_image_submit] post update failed (non-fatal): ${e.message}`)
     }
   }
+  if (!image?.url) {
+    console.error(`[social_image_submit] image generation failed postId=${postId}: ${image?.error}`)
+  }
 
   const updatedPayload = image?.url
     ? { ...payload, post: { ...(payload.post || {}), image_url: image.url } }
-    : payload
+    : { ...payload, post: { ...(payload.post || {}), image_error: image?.error } }
+
+  // insertApprovalGate reads ctx.payload directly (not the object passed to
+  // buildApprovalPreview) when it writes the approval_queue row — so without
+  // this reassignment the image_url never makes it into the JSON the
+  // frontend reads, even though preview_html and the social_posts row are
+  // both correct. This was the cause of "image missing in approval queue".
+  ctx.payload = updatedPayload
 
   await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
 }
@@ -809,6 +827,10 @@ export async function socialImagePoll(ctx) {
       post: { ...payload.post, image_url: publicUrl },
     }
 
+    // See note in socialImageSubmit — must reassign ctx.payload or the
+    // approval_queue row's stored JSON never gets the image_url.
+    ctx.payload = updatedPayload
+
     await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
 
   } catch (e) {
@@ -832,7 +854,7 @@ function buildApprovalPreview(payload) {
   const postType  = payload.post_type || 'product'
   const imageHtml = post.image_url
     ? `<img src="${post.image_url}" style="max-width:100%;border-radius:8px;margin:12px 0"/>`
-    : '<p style="color:#94a3b8;font-size:12px">Image generating or unavailable</p>'
+    : `<p style="color:#dc2626;font-size:12px">Image generation failed: ${post.image_error || 'unknown error'}</p>`
 
   const preview = `
     <div style="font-family:Arial,sans-serif;max-width:600px">
