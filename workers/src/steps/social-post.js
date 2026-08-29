@@ -388,10 +388,20 @@ Rules:
 - Convey quality, strength, and professional grade
 Output ONLY the prompt text — no explanation, no quotes, no preamble`
 
+    const fallbackImgPrompt = `Realistic DSLR commercial photography of ${order.product_name} in a professional industrial setting, natural lighting, sharp focus, photorealistic editorial`
     try {
-      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"+|"+$/g, '').trim()
     } catch (e) {
-      imgPrompt = `Realistic DSLR commercial photography of ${order.product_name} in a professional industrial setting, natural lighting, sharp focus, photorealistic editorial`
+      imgPrompt = fallbackImgPrompt
+    }
+    // The model can return a response that survives cfAiInvoke's empty-string
+    // check (e.g. a bare `""`, or whitespace) but collapses to nothing once
+    // trimmed/unquoted here. That used to flow through as imgPrompt = "",
+    // which social_image_submit then skipped *silently* — no image, no
+    // error recorded anywhere. Treat it the same as a thrown error.
+    if (!imgPrompt) {
+      console.warn('[social_cf_generate_post] image prompt generation returned empty — using fallback')
+      imgPrompt = fallbackImgPrompt
     }
   } else {
     const ipPrompt = `Write a FLUX image generation prompt (70-90 words) for an editorial photograph showing modern B2B supply chain technology in action.
@@ -403,10 +413,15 @@ Show a laptop in a professional office displaying a supply chain dashboard with 
 Rules: realistic DSLR, natural office lighting, navy and gold UI on screen, shallow depth of field, professional Indian business context.
 Output ONLY the prompt — no explanation, no quotes`
 
+    const fallbackImgPrompt = `Realistic DSLR photo of a procurement professional reviewing a B2B supply chain dashboard, navy and gold UI, natural lighting, industrial supply catalogue on desk, shallow depth of field, photorealistic`
     try {
-      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"|"$/g, '')
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"+|"+$/g, '').trim()
     } catch (e) {
-      imgPrompt = `Realistic DSLR photo of a procurement professional reviewing a B2B supply chain dashboard, navy and gold UI, natural lighting, industrial supply catalogue on desk, shallow depth of field, photorealistic`
+      imgPrompt = fallbackImgPrompt
+    }
+    if (!imgPrompt) {
+      console.warn('[social_cf_generate_post] tech image prompt generation returned empty — using fallback')
+      imgPrompt = fallbackImgPrompt
     }
   }
 
@@ -441,6 +456,7 @@ Output ONLY the prompt — no explanation, no quotes`
     repo_name:          postType === 'tech' && repoName ? repoName : null,
     prompt:             prompt || null,
     workflow_run_id:    workflowRunId || null,
+    image_prompt:       imgPrompt || null,
   }
 
   const saved = await sb.insert('social_posts', row)
@@ -584,6 +600,12 @@ Visual style:
 - Sharp, photorealistic, no text overlays, no people
 - Convey: modern, reliable, professional B2B technology`
 
+  try {
+    await sb.update('social_posts', { image_prompt: imgPrompt }, `id=eq.${saved.id}`)
+  } catch (e) {
+    console.warn(`[social_tech_generate_post] image_prompt column update failed (non-fatal): ${e.message}`)
+  }
+
   await nextJob(ctx, 'social_tech_image_submit', {
     postId:       saved.id,
     post:         { ...saved, title, content: contentData.facebook || '' },
@@ -691,8 +713,23 @@ export async function socialImageSubmit(ctx) {
   const postId    = payload.postId
 
   if (!imgPrompt) {
-    console.log('[social_image_submit] no image prompt — skipping to approval')
-    await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(payload))
+    // This should be rare now that socialCfGeneratePost always falls back to
+    // a template prompt, but if it ever happens again it must be visible —
+    // previously this just logged and silently moved on with no image and
+    // no trace of why.
+    const msg = 'No image prompt was generated for this post'
+    console.error(`[social_image_submit] ${msg} postId=${postId}`)
+    if (postId) {
+      try {
+        const sb = getClient(env)
+        await sb.update('social_posts', { image_error: msg }, `id=eq.${postId}`)
+      } catch (e) {
+        console.warn(`[social_image_submit] post update failed (non-fatal): ${e.message}`)
+      }
+    }
+    const updatedPayload = { ...payload, post: { ...(payload.post || {}), image_error: msg } }
+    ctx.payload = updatedPayload
+    await insertApprovalGate(ctx, 'social_post_to_platforms', buildApprovalPreview(updatedPayload))
     return
   }
 
