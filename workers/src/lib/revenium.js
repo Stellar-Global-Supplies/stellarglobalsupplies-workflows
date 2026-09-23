@@ -223,7 +223,6 @@ export async function reportUsage(
               statusText: response.statusText,
               body,
               endpoint: REVENIUM_METERING_URL,
-              hasApiKey,
             })
         );
 
