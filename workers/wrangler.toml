@@ -43,3 +43,12 @@ store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 binding     = "BEDROCK_REGION"
 secret_name = "BEDROCK_REGION"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+# Revenium AI metering — reuses the same account-level Secrets Store as the
+# secrets above. Accessed via await env.REVENIUM_API_KEY.get() in
+# src/lib/revenium.js. Reuses the same secret already created for the
+# aiwidget/stellarai projects — same store_id, same name, no need to recreate.
+[[secrets_store_secrets]]
+binding     = "REVENIUM_API_KEY"
+secret_name = "REVENIUM_API_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
