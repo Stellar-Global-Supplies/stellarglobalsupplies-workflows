@@ -2,15 +2,19 @@
  * Revenium AI metering for Cloudflare Workers
  *
  * Cost calculation:
- *   - LiteLLM public model pricing catalog
- *   - Cost calculated locally from input/output token counts
- *   - Calculated cost sent to Revenium as:
- *       inputTokenCost
- *       outputTokenCost
- *       totalCost
+ *   1. Get token usage from the AI response
+ *   2. Check existing Cloudflare KV: AI_PRICING
+ *   3. On cache miss, fetch LiteLLM pricing catalog
+ *   4. Calculate input/output/total cost locally
+ *   5. Send token usage + calculated cost to Revenium
  *
- * Revenium:
- * POST https://api.revenium.ai/meter/v2/ai/completions
+ * Existing values preserved:
+ *   Organization: Stellar Global Supplies
+ *   Product: stellar-workflows
+ *   Provider: Cloudflare
+ *
+ * Existing KV binding:
+ *   AI_PRICING
  */
 
 const REVENIUM_METERING_URL =
@@ -23,8 +27,18 @@ const ORGANIZATION_NAME = "Stellar Global Supplies";
 const PRODUCT_NAME = "stellar-workflows";
 const PROVIDER = "Cloudflare";
 
+// Existing KV binding — DO NOT RENAME
+const PRICING_KV_BINDING = "AI_PRICING";
+
+// Pricing catalog cache duration: 24 hours
+const PRICING_CACHE_TTL = 86400;
+
+const PRICING_CACHE_KEY =
+  "litellm:model-pricing:v1";
+
 /**
  * Resolve Revenium API key from:
+ *
  * - normal Worker env variable / Wrangler secret
  * - Cloudflare Secrets Store binding
  */
@@ -35,10 +49,12 @@ async function getReveniumApiKey(env) {
     return null;
   }
 
+  // Normal Wrangler secret / environment variable
   if (typeof binding === "string") {
     return binding.trim();
   }
 
+  // Cloudflare Secrets Store
   if (typeof binding.get === "function") {
     try {
       const value = await binding.get();
@@ -62,7 +78,7 @@ async function getReveniumApiKey(env) {
 }
 
 /**
- * Normalize Workers AI usage into Revenium token fields.
+ * Normalize Workers AI usage into Revenium's expected token fields.
  */
 function normalizeUsage(usage) {
   if (!usage) {
@@ -102,10 +118,16 @@ function normalizeUsage(usage) {
 
 /**
  * Rough token estimate for call sites where Workers AI
- * does not return token usage.
+ * does not return a usage block.
+ *
+ * Example:
+ * FLUX image generation does not expose normal token
+ * usage, so the text prompt can be estimated.
  */
 export function estimateTokens(text) {
-  if (!text) return 0;
+  if (!text) {
+    return 0;
+  }
 
   return Math.max(
     1,
@@ -114,16 +136,18 @@ export function estimateTokens(text) {
 }
 
 /**
- * Normalize model names for LiteLLM lookup.
+ * Create model candidates for LiteLLM matching.
  *
- * Example:
+ * Cloudflare example:
+ *
  * @cf/meta/llama-4-scout-17b-16e-instruct
  *
- * LiteLLM may contain provider-specific prefixes,
- * so we try several representations.
+ * LiteLLM may represent the same model with a different
+ * provider prefix, so we try multiple forms.
  */
 function getModelCandidates(model, provider) {
-  const original = String(model || "").trim();
+  const original =
+    String(model || "").trim();
 
   if (!original) {
     return [];
@@ -131,34 +155,51 @@ function getModelCandidates(model, provider) {
 
   const candidates = new Set();
 
+  // Original model
   candidates.add(original);
 
-  // Remove provider prefix such as @cf/
-  if (original.includes("/")) {
-    candidates.add(
-      original.substring(original.lastIndexOf("/") + 1)
-    );
-  }
-
-  // Remove @cf/ prefix
+  // Remove @cf/
   candidates.add(
     original.replace(/^@cf\//i, "")
   );
 
-  // Remove provider namespace
+  // Remove generic provider prefix
   candidates.add(
     original.replace(/^@[^/]+\//i, "")
   );
 
-  // Cloudflare model aliases
-  if (/llama-4-scout-17b-16e-instruct/i.test(original)) {
-    candidates.add("llama-4-scout-17b-16e-instruct");
-    candidates.add("meta-llama/llama-4-scout-17b-16e-instruct");
+  // Last segment after /
+  if (original.includes("/")) {
+    candidates.add(
+      original.substring(
+        original.lastIndexOf("/") + 1
+      )
+    );
   }
 
+  // Provider/model
   if (provider) {
     candidates.add(
       `${provider}/${original}`
+    );
+  }
+
+  // Known Cloudflare model normalization
+  if (
+    /llama-4-scout-17b-16e-instruct/i.test(
+      original
+    )
+  ) {
+    candidates.add(
+      "llama-4-scout-17b-16e-instruct"
+    );
+
+    candidates.add(
+      "meta-llama/llama-4-scout-17b-16e-instruct"
+    );
+
+    candidates.add(
+      "cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct"
     );
   }
 
@@ -166,119 +207,175 @@ function getModelCandidates(model, provider) {
 }
 
 /**
- * Find pricing in LiteLLM's model catalog.
+ * Find model pricing inside LiteLLM catalog.
  *
- * LiteLLM pricing fields:
+ * LiteLLM fields:
  *
  * input_cost_per_token
  * output_cost_per_token
- *
- * These are USD per token.
  */
-function findLiteLLMPricing(catalog, model, provider) {
-  if (!catalog || typeof catalog !== "object") {
+function findLiteLLMPricing(
+  catalog,
+  model,
+  provider
+) {
+  if (
+    !catalog ||
+    typeof catalog !== "object"
+  ) {
     return null;
   }
 
-  const candidates = getModelCandidates(model, provider);
+  const candidates =
+    getModelCandidates(
+      model,
+      provider
+    );
 
-  // Exact lookup first.
+  const catalogKeys =
+    Object.keys(catalog);
+
+  // ---------------------------------------------------------
+  // 1. Exact key match
+  // ---------------------------------------------------------
   for (const candidate of candidates) {
-    const entry = catalog[candidate];
+    const entry =
+      catalog[candidate];
 
     if (
       entry &&
       (
-        entry.input_cost_per_token !== undefined ||
-        entry.output_cost_per_token !== undefined
+        entry.input_cost_per_token !==
+          undefined ||
+        entry.output_cost_per_token !==
+          undefined
       )
     ) {
       return {
         modelKey: candidate,
-        inputCostPerToken: Number(
-          entry.input_cost_per_token || 0
-        ),
-        outputCostPerToken: Number(
-          entry.output_cost_per_token || 0
-        ),
+
+        inputCostPerToken:
+          Number(
+            entry.input_cost_per_token || 0
+          ),
+
+        outputCostPerToken:
+          Number(
+            entry.output_cost_per_token || 0
+          ),
+
         source: "LiteLLM",
       };
     }
   }
 
-  // Case-insensitive exact lookup.
-  const catalogKeys = Object.keys(catalog);
-
+  // ---------------------------------------------------------
+  // 2. Case-insensitive exact match
+  // ---------------------------------------------------------
   for (const candidate of candidates) {
-    const lowerCandidate = candidate.toLowerCase();
+    const lowerCandidate =
+      candidate.toLowerCase();
 
-    const matchingKey = catalogKeys.find(
-      (key) => key.toLowerCase() === lowerCandidate
-    );
+    const matchingKey =
+      catalogKeys.find(
+        (key) =>
+          key.toLowerCase() ===
+          lowerCandidate
+      );
 
     if (!matchingKey) {
       continue;
     }
 
-    const entry = catalog[matchingKey];
+    const entry =
+      catalog[matchingKey];
 
     if (
       entry &&
       (
-        entry.input_cost_per_token !== undefined ||
-        entry.output_cost_per_token !== undefined
+        entry.input_cost_per_token !==
+          undefined ||
+        entry.output_cost_per_token !==
+          undefined
       )
     ) {
       return {
         modelKey: matchingKey,
-        inputCostPerToken: Number(
-          entry.input_cost_per_token || 0
-        ),
-        outputCostPerToken: Number(
-          entry.output_cost_per_token || 0
-        ),
+
+        inputCostPerToken:
+          Number(
+            entry.input_cost_per_token || 0
+          ),
+
+        outputCostPerToken:
+          Number(
+            entry.output_cost_per_token || 0
+          ),
+
         source: "LiteLLM",
       };
     }
   }
 
-  // Last attempt: compare normalized model names.
-  const normalizedTarget = String(model)
-    .toLowerCase()
-    .replace(/^@[^/]+\//, "")
-    .replace(/[^a-z0-9]/g, "");
+  // ---------------------------------------------------------
+  // 3. Normalized model matching
+  // ---------------------------------------------------------
+  const normalizeForComparison =
+    (value) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/^@[^/]+\//, "")
+        .replace(/^cloudflare\//, "")
+        .replace(/[^a-z0-9]/g, "");
+
+  const targetCandidates =
+    candidates.map(
+      normalizeForComparison
+    );
 
   for (const key of catalogKeys) {
-    const normalizedKey = key
-      .toLowerCase()
-      .replace(/^@[^/]+\//, "")
-      .replace(/[^a-z0-9]/g, "");
+    const normalizedKey =
+      normalizeForComparison(key);
+
+    const matched =
+      targetCandidates.some(
+        (target) =>
+          normalizedKey === target ||
+          normalizedKey.endsWith(target) ||
+          target.endsWith(normalizedKey)
+      );
+
+    if (!matched) {
+      continue;
+    }
+
+    const entry =
+      catalog[key];
 
     if (
-      normalizedKey === normalizedTarget ||
-      normalizedKey.endsWith(normalizedTarget) ||
-      normalizedTarget.endsWith(normalizedKey)
+      entry &&
+      (
+        entry.input_cost_per_token !==
+          undefined ||
+        entry.output_cost_per_token !==
+          undefined
+      )
     ) {
-      const entry = catalog[key];
+      return {
+        modelKey: key,
 
-      if (
-        entry &&
-        (
-          entry.input_cost_per_token !== undefined ||
-          entry.output_cost_per_token !== undefined
-        )
-      ) {
-        return {
-          modelKey: key,
-          inputCostPerToken: Number(
+        inputCostPerToken:
+          Number(
             entry.input_cost_per_token || 0
           ),
-          outputCostPerToken: Number(
+
+        outputCostPerToken:
+          Number(
             entry.output_cost_per_token || 0
           ),
-          source: "LiteLLM",
-        };
-      }
+
+        source: "LiteLLM",
+      };
     }
   }
 
@@ -286,31 +383,34 @@ function findLiteLLMPricing(catalog, model, provider) {
 }
 
 /**
- * Fetch LiteLLM pricing catalog.
+ * Get LiteLLM pricing catalog.
  *
- * Optional KV caching:
+ * Uses existing KV binding:
  *
- * Add to wrangler.toml:
+ *   env.AI_PRICING
  *
- * [[kv_namespaces]]
- * binding = "LITELLM_PRICING_KV"
- * id = "YOUR_KV_NAMESPACE_ID"
+ * Cache:
+ *   24 hours
  *
- * If KV is not configured, this function simply fetches
- * the LiteLLM catalog directly.
+ * If KV is unavailable, the Worker continues by
+ * fetching LiteLLM directly.
  */
-async function getLiteLLMPricingCatalog(env) {
-  const cacheKey = "litellm:model-pricing:v1";
+async function getLiteLLMPricingCatalog(
+  env
+) {
+  const kv =
+    env[PRICING_KV_BINDING];
 
   // ---------------------------------------------------------
-  // 1. Try KV cache
+  // 1. KV CACHE
   // ---------------------------------------------------------
-  if (env.LITELLM_PRICING_KV) {
+  if (kv) {
     try {
-      const cached = await env.LITELLM_PRICING_KV.get(
-        cacheKey,
-        "json"
-      );
+      const cached =
+        await kv.get(
+          PRICING_CACHE_KEY,
+          "json"
+        );
 
       if (cached) {
         console.log(
@@ -319,66 +419,89 @@ async function getLiteLLMPricingCatalog(env) {
 
         return cached;
       }
+
+      console.log(
+        "[revenium] LiteLLM pricing cache MISS"
+      );
     } catch (err) {
       console.warn(
         "[revenium] LiteLLM KV read failed:",
         err?.message || err
       );
     }
-  }
-
-  // ---------------------------------------------------------
-  // 2. Fetch LiteLLM catalog
-  // ---------------------------------------------------------
-  console.log(
-    "[revenium] LiteLLM pricing cache MISS — fetching catalog"
-  );
-
-  const response = await fetch(
-    LITELLM_PRICING_URL,
-    {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "stellar-workflows-revenium-metering",
-      },
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `LiteLLM pricing request failed: ${response.status} ${response.statusText}`
+  } else {
+    console.warn(
+      "[revenium] AI_PRICING KV binding not available"
     );
   }
 
-  const catalog = await response.json();
+  // ---------------------------------------------------------
+  // 2. FETCH LITELLM CATALOG
+  // ---------------------------------------------------------
+  try {
+    console.log(
+      "[revenium] fetching LiteLLM pricing catalog"
+    );
 
-  // ---------------------------------------------------------
-  // 3. Store in KV
-  // ---------------------------------------------------------
-  if (env.LITELLM_PRICING_KV) {
-    try {
-      // Cache for 24 hours.
-      await env.LITELLM_PRICING_KV.put(
-        cacheKey,
-        JSON.stringify(catalog),
+    const response =
+      await fetch(
+        LITELLM_PRICING_URL,
         {
-          expirationTtl: 86400,
+          method: "GET",
+
+          headers: {
+            Accept:
+              "application/json",
+
+            "User-Agent":
+              "stellar-workflows-revenium-metering",
+          },
         }
       );
 
-      console.log(
-        "[revenium] LiteLLM pricing catalog cached for 24h"
-      );
-    } catch (err) {
-      console.warn(
-        "[revenium] LiteLLM KV write failed:",
-        err?.message || err
+    if (!response.ok) {
+      throw new Error(
+        `LiteLLM pricing request failed: ${response.status} ${response.statusText}`
       );
     }
-  }
 
-  return catalog;
+    const catalog =
+      await response.json();
+
+    // -------------------------------------------------------
+    // 3. SAVE TO EXISTING KV
+    // -------------------------------------------------------
+    if (kv) {
+      try {
+        await kv.put(
+          PRICING_CACHE_KEY,
+          JSON.stringify(catalog),
+          {
+            expirationTtl:
+              PRICING_CACHE_TTL,
+          }
+        );
+
+        console.log(
+          "[revenium] LiteLLM pricing catalog cached for 24h"
+        );
+      } catch (err) {
+        console.warn(
+          "[revenium] LiteLLM KV write failed:",
+          err?.message || err
+        );
+      }
+    }
+
+    return catalog;
+  } catch (err) {
+    console.warn(
+      "[revenium] LiteLLM catalog fetch failed:",
+      err?.message || err
+    );
+
+    return null;
+  }
 }
 
 /**
@@ -395,7 +518,17 @@ async function calculateCost(
 ) {
   try {
     const catalog =
-      await getLiteLLMPricingCatalog(env);
+      await getLiteLLMPricingCatalog(
+        env
+      );
+
+    if (!catalog) {
+      console.warn(
+        "[revenium] pricing catalog unavailable"
+      );
+
+      return null;
+    }
 
     const pricing =
       findLiteLLMPricing(
@@ -425,29 +558,50 @@ async function calculateCost(
       inputTokenCost +
       outputTokenCost;
 
-    const result = {
-      inputTokenCost,
-      outputTokenCost,
-      totalCost,
-      pricing,
-    };
-
     console.log(
-      "[revenium] calculated cost:",
+      "[revenium] COST CALCULATED:",
       JSON.stringify({
         model,
         provider,
+
         inputTokenCount,
         outputTokenCount,
+
+        inputCostPerToken:
+          pricing.inputCostPerToken,
+
+        outputCostPerToken:
+          pricing.outputCostPerToken,
+
         inputTokenCost,
         outputTokenCost,
         totalCost,
-        pricingModel: pricing.modelKey,
-        pricingSource: pricing.source,
+
+        pricingModel:
+          pricing.modelKey,
+
+        pricingSource:
+          pricing.source,
       })
     );
 
-    return result;
+    return {
+      inputTokenCost,
+      outputTokenCost,
+      totalCost,
+
+      inputCostPerToken:
+        pricing.inputCostPerToken,
+
+      outputCostPerToken:
+        pricing.outputCostPerToken,
+
+      pricingModel:
+        pricing.modelKey,
+
+      pricingSource:
+        pricing.source,
+    };
   } catch (err) {
     console.warn(
       "[revenium] cost calculation failed:",
@@ -460,6 +614,16 @@ async function calculateCost(
 
 /**
  * Report one AI request to Revenium.
+ *
+ * Existing call sites remain compatible.
+ *
+ * Optional:
+ *   provider
+ *   modelSource
+ *   traceId
+ *   taskType
+ *   agent
+ *   transactionId
  */
 export async function reportUsage(
   env,
@@ -470,16 +634,28 @@ export async function reportUsage(
     operationType = "CHAT",
     requestStartTime,
     ctx,
+
     provider = PROVIDER,
+
+    modelSource = provider,
+
     traceId,
+
     taskType,
+
     agent,
+
     transactionId,
   }
 ) {
   const run = async () => {
+    // -------------------------------------------------------
+    // REVENIUM API KEY
+    // -------------------------------------------------------
     const apiKey =
-      await getReveniumApiKey(env);
+      await getReveniumApiKey(
+        env
+      );
 
     if (!apiKey) {
       console.warn(
@@ -489,6 +665,9 @@ export async function reportUsage(
       return;
     }
 
+    // -------------------------------------------------------
+    // TOKEN USAGE
+    // -------------------------------------------------------
     const normalized =
       normalizeUsage(usage);
 
@@ -497,6 +676,16 @@ export async function reportUsage(
       outputTokenCount,
       totalTokenCount,
     } = normalized;
+
+    console.log(
+      "[revenium] TOKEN USAGE:",
+      JSON.stringify({
+        model,
+        inputTokenCount,
+        outputTokenCount,
+        totalTokenCount,
+      })
+    );
 
     if (
       inputTokenCount === 0 &&
@@ -510,6 +699,9 @@ export async function reportUsage(
       return;
     }
 
+    // -------------------------------------------------------
+    // TIMING
+    // -------------------------------------------------------
     const requestTime =
       requestStartTime
         ? new Date(requestStartTime)
@@ -528,37 +720,57 @@ export async function reportUsage(
           requestTime.getTime()
       );
 
-    // ---------------------------------------------------------
-    // Calculate cost locally using LiteLLM
-    // ---------------------------------------------------------
+    // -------------------------------------------------------
+    // LOCAL COST CALCULATION
+    // -------------------------------------------------------
     const cost =
-      await calculateCost(env, {
-        model,
-        provider,
-        inputTokenCount,
-        outputTokenCount,
-      });
+      await calculateCost(
+        env,
+        {
+          model,
+          provider,
+          inputTokenCount,
+          outputTokenCount,
+        }
+      );
 
+    console.log(
+      "[revenium] FINAL COST:",
+      cost?.totalCost ?? null
+    );
+
+    // -------------------------------------------------------
+    // REVENIUM PAYLOAD
+    // -------------------------------------------------------
     const payload = {
-      model: model || "unknown",
+      model:
+        model || "unknown",
+
+      provider,
+
+      modelSource,
 
       inputTokenCount,
+
       outputTokenCount,
+
       totalTokenCount,
 
-      // -------------------------------------------------------
-      // IMPORTANT:
-      // Send our calculated cost to Revenium.
-      // Do NOT ask Revenium to calculate it.
-      // -------------------------------------------------------
+      // Our own calculated pricing.
+      //
+      // Keep full precision.
+      // Do NOT round to cents.
       inputTokenCost:
-        cost?.inputTokenCost ?? null,
+        cost?.inputTokenCost ??
+        null,
 
       outputTokenCost:
-        cost?.outputTokenCost ?? null,
+        cost?.outputTokenCost ??
+        null,
 
       totalCost:
-        cost?.totalCost ?? null,
+        cost?.totalCost ??
+        null,
 
       requestTime:
         requestTime.toISOString(),
@@ -571,16 +783,13 @@ export async function reportUsage(
 
       requestDuration,
 
-      provider,
-
-      // Actual model source/provider.
-      modelSource: provider,
-
-      stopReason: "STOP",
+      stopReason:
+        "STOP",
 
       operationType,
 
-      costType: "AI",
+      costType:
+        "AI",
 
       organizationName:
         ORGANIZATION_NAME,
@@ -599,37 +808,59 @@ export async function reportUsage(
         crypto.randomUUID(),
 
       ...(traceId
-        ? { traceId }
+        ? {
+            traceId,
+          }
         : {}),
 
       ...(taskType
-        ? { taskType }
+        ? {
+            taskType,
+          }
         : {}),
 
       ...(agent
-        ? { agent }
+        ? {
+            agent,
+          }
         : {}),
     };
 
     console.log(
       "[revenium] FINAL COST PAYLOAD:",
       JSON.stringify({
-        model: payload.model,
-        provider: payload.provider,
-        modelSource: payload.modelSource,
+        model:
+          payload.model,
+
+        provider:
+          payload.provider,
+
+        modelSource:
+          payload.modelSource,
+
         inputTokenCount:
           payload.inputTokenCount,
+
         outputTokenCount:
           payload.outputTokenCount,
+
+        totalTokenCount:
+          payload.totalTokenCount,
+
         inputTokenCost:
           payload.inputTokenCost,
+
         outputTokenCost:
           payload.outputTokenCost,
+
         totalCost:
           payload.totalCost,
       })
     );
 
+    // -------------------------------------------------------
+    // REVENIUM METERING
+    // -------------------------------------------------------
     try {
       const response =
         await fetch(
@@ -649,7 +880,9 @@ export async function reportUsage(
             },
 
             body:
-              JSON.stringify(payload),
+              JSON.stringify(
+                payload
+              ),
           }
         );
 
@@ -686,8 +919,7 @@ export async function reportUsage(
 
           provider,
 
-          modelSource:
-            provider,
+          modelSource,
 
           inputTokenCount,
 
@@ -707,10 +939,12 @@ export async function reportUsage(
             cost?.totalCost ??
             null,
 
-          body,
+          transactionId:
+            payload.transactionId,
         })
       );
     } catch (err) {
+      // Revenium must never break the workflow.
       console.warn(
         "[revenium] metering call errored:",
         err?.message || err
@@ -718,13 +952,18 @@ export async function reportUsage(
     }
   };
 
+  // ---------------------------------------------------------
+  // Cloudflare ExecutionContext
+  // ---------------------------------------------------------
   if (
     ctx &&
-    typeof ctx.waitUntil === "function"
+    typeof ctx.waitUntil ===
+      "function"
   ) {
     ctx.waitUntil(run());
     return;
   }
 
+  // Background job / workflow context.
   await run();
 }
