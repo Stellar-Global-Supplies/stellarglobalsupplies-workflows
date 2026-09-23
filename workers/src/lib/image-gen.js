@@ -20,6 +20,7 @@
  */
 
 import { uploadImage, imageExtAndType } from './assets.js'
+import { reportUsage, estimateTokens } from './revenium.js'
 
 const MODEL = '@cf/black-forest-labs/flux-1-schnell'
 
@@ -35,6 +36,7 @@ export async function generateImage(env, prompt, opts = {}) {
   const params = { prompt }
   if (opts.steps != null) params.steps = Math.min(Math.max(opts.steps, 1), 8)
 
+  const callStart = Date.now()
   let response
   try {
     response = await env.AI.run(MODEL, params)
@@ -49,6 +51,22 @@ export async function generateImage(env, prompt, opts = {}) {
       throw e
     }
   }
+
+  // FLUX returns no token usage — meter the prompt only (estimated), tagged
+  // as an IMAGE operation so it's distinguishable from chat/text calls.
+  const promptTokenEstimate = estimateTokens(prompt)
+  reportUsage(env, {
+    model: MODEL,
+    sessionId: opts.sessionId,
+    usage: {
+      inputTokenCount: promptTokenEstimate,
+      outputTokenCount: 0,
+      totalTokenCount: promptTokenEstimate,
+    },
+    operationType: 'IMAGE',
+    requestStartTime: callStart,
+    ctx: opts.ctx,
+  }).catch(() => {})
 
   // Workers AI FLUX always returns { image: "<base64 jpeg string>" }
   if (!response?.image) throw new Error(`FLUX returned no image. Response: ${JSON.stringify(response)}`)
