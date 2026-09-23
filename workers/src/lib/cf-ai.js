@@ -18,6 +18,9 @@
  *     → Llama 4 Scout's 10 M-token context + large output window suits these tasks
  */
 
+import { reportUsage, estimateTokens } from './revenium.js'
+import { bedrockGenerateText } from './bedrock.js'
+
 // ── Model selection ───────────────────────────────────────────────────────────
 
 /** Fast model — structured JSON extraction / short outputs (≤ 1 200 tokens) */
@@ -41,7 +44,7 @@ function pickModel(maxTokens) {
  * @param {boolean} jsonMode    - Whether to request JSON output
  * @returns {Promise<string>}   - Raw text response
  */
-async function cfAiInvoke(env, prompt, system, maxTokens, jsonMode = false) {
+async function cfAiInvoke(env, prompt, system, maxTokens, jsonMode = false, meta = {}) {
   if (!env.AI) throw new Error('CF Workers AI binding (AI) not found in env')
 
   const messages = []
@@ -62,18 +65,70 @@ async function cfAiInvoke(env, prompt, system, maxTokens, jsonMode = false) {
   }
 
   const model  = pickModel(maxTokens)
-  const result = await env.AI.run(model, params)
+  const callStart = Date.now()
 
-  let text = result?.response ?? result?.result?.response
+  let text
+  let usedModel = model
+  let usedProvider = 'Cloudflare'
 
-  // Workers AI can return an already-parsed object/array when
-  // response_format: json_object is set (varies by model version).
-  // Normalize everything down to a string so downstream parsing is uniform.
-  if (text != null && typeof text !== 'string') {
-    text = JSON.stringify(text)
+  try {
+    const result = await env.AI.run(model, params)
+
+    reportUsage(env, {
+      model,
+      sessionId: meta.sessionId,
+      usage: result?.usage,
+      operationType: 'CHAT',
+      requestStartTime: callStart,
+      ctx: meta.ctx,
+    }).catch(() => {}) // never let metering reject the caller's promise chain
+
+    text = result?.response ?? result?.result?.response
+
+    // Workers AI can return an already-parsed object/array when
+    // response_format: json_object is set (varies by model version).
+    // Normalize everything down to a string so downstream parsing is uniform.
+    if (text != null && typeof text !== 'string') {
+      text = JSON.stringify(text)
+    }
+
+    if (!text) throw new Error(`CF Workers AI (${model}) returned empty response`)
+  } catch (cfErr) {
+    // ── Fallback to AWS Bedrock (Nova Pro) ──────────────────────────────────
+    // Same fallback this repo used before the Workers AI migration. Only
+    // engages if BEDROCK_* secrets are configured — if they're not (or
+    // Bedrock also fails), the original Workers AI error is what surfaces,
+    // since that's more actionable than a "missing secret" error masking it.
+    console.warn(`[cf-ai] Workers AI (${model}) failed (${cfErr.message}) — falling back to Bedrock`)
+
+    const bedrockStart = Date.now()
+    try {
+      text = await bedrockGenerateText(env, prompt, system, maxTokens)
+      usedModel = 'amazon.nova-pro-v1:0'
+      usedProvider = 'AWS Bedrock'
+
+      // Bedrock's raw HTTP response has no token-usage field surfaced by
+      // bedrock.js today, so meter with an estimate rather than skipping
+      // the fallback call entirely.
+      reportUsage(env, {
+        model: usedModel,
+        sessionId: meta.sessionId,
+        usage: {
+          inputTokenCount: estimateTokens(prompt + (system || '')),
+          outputTokenCount: estimateTokens(text),
+        },
+        operationType: 'CHAT',
+        requestStartTime: bedrockStart,
+        ctx: meta.ctx,
+        provider: usedProvider,
+      }).catch(() => {})
+    } catch (bedrockErr) {
+      throw new Error(
+        `Workers AI failed (${cfErr.message}) and Bedrock fallback also failed (${bedrockErr.message})`
+      )
+    }
   }
 
-  if (!text) throw new Error(`CF Workers AI (${model}) returned empty response`)
   return text
 }
 
@@ -83,8 +138,8 @@ async function cfAiInvoke(env, prompt, system, maxTokens, jsonMode = false) {
  * Generate and parse a JSON response — replaces bedrockGenerateJson().
  * Applies the same multi-stage fallback JSON extraction logic.
  */
-export async function cfAiGenerateJson(env, prompt, system = '', maxTokens = 2000) {
-  const raw = await cfAiInvoke(env, prompt, system, maxTokens, true)
+export async function cfAiGenerateJson(env, prompt, system = '', maxTokens = 2000, meta = {}) {
+  const raw = await cfAiInvoke(env, prompt, system, maxTokens, true, meta)
 
   // Defensive: cfAiInvoke should always return a string, but guard anyway
   const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
@@ -167,18 +222,18 @@ function repairJsonControlChars(text) {
 /**
  * Generate plain text — replaces bedrockGenerateText().
  */
-export async function cfAiGenerateText(env, prompt, system = '', maxTokens = 2000) {
-  return cfAiInvoke(env, prompt, system, maxTokens, false)
+export async function cfAiGenerateText(env, prompt, system = '', maxTokens = 2000, meta = {}) {
+  return cfAiInvoke(env, prompt, system, maxTokens, false, meta)
 }
 
 /**
  * Generate structured JSON for fast extraction tasks (replaces groqJson()).
  * Identical to cfAiGenerateJson but always uses the fast model via low maxTokens.
  */
-export async function cfAiExtractJson(env, prompt, system = '', maxTokens = 800) {
+export async function cfAiExtractJson(env, prompt, system = '', maxTokens = 800, meta = {}) {
   // Cap to fast-model range so pickModel() always chooses MODEL_FAST
   const tokens = Math.min(maxTokens, 1200)
-  return cfAiGenerateJson(env, prompt, system, tokens)
+  return cfAiGenerateJson(env, prompt, system, tokens, meta)
 }
 
 /**
@@ -196,7 +251,7 @@ export async function cfAiExtractJson(env, prompt, system = '', maxTokens = 800)
  * @param {object} schema     - JSON Schema object with "properties"/"required"
  * @param {number} maxTokens
  */
-export async function cfAiExtractJsonStrict(env, prompt, system, schema, maxTokens = 800) {
+export async function cfAiExtractJsonStrict(env, prompt, system, schema, maxTokens = 800, meta = {}) {
   if (!env.AI) throw new Error('CF Workers AI binding (AI) not found in env')
 
   const tokens = Math.min(maxTokens, 2000)
@@ -205,12 +260,22 @@ export async function cfAiExtractJsonStrict(env, prompt, system, schema, maxToke
   messages.push({ role: 'user', content: prompt })
 
   try {
+    const callStart = Date.now()
     const result = await env.AI.run(MODEL_FAST, {
       messages,
       max_tokens: tokens,
       temperature: 0.2,
       response_format: { type: 'json_schema', json_schema: schema },
     })
+
+    reportUsage(env, {
+      model: MODEL_FAST,
+      sessionId: meta.sessionId,
+      usage: result?.usage,
+      operationType: 'CHAT',
+      requestStartTime: callStart,
+      ctx: meta.ctx,
+    }).catch(() => {})
 
     let text = result?.response ?? result?.result?.response
     if (text != null && typeof text !== 'string') return text // already parsed object
@@ -224,6 +289,6 @@ export async function cfAiExtractJsonStrict(env, prompt, system, schema, maxToke
     return JSON.parse(repairJsonControlChars(clean))
   } catch (e) {
     console.warn(`[cfAiExtractJsonStrict] schema mode failed (${e.message}), falling back to json_object mode`)
-    return cfAiExtractJson(env, prompt, system, maxTokens)
+    return cfAiExtractJson(env, prompt, system, maxTokens, meta)
   }
 }
