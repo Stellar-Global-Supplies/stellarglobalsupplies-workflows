@@ -20,9 +20,15 @@
  */
 
 import { uploadImage, imageExtAndType } from './assets.js'
-import { reportUsage, estimateTokens } from './revenium.js'
+import { reportImageUsage } from './revenium.js'
 
 const MODEL = '@cf/black-forest-labs/flux-1-schnell'
+
+// The MODEL vendor, not the host. Cloudflare hosts/runs this model on
+// Workers AI, but the model itself — and its actual creator — is Black
+// Forest Labs. Revenium's `provider` field means "who actually made the
+// model", so this must say Black Forest Labs, not Cloudflare.
+const IMAGE_PROVIDER = 'Black Forest Labs'
 
 /**
  * Generate an image using Workers AI FLUX.
@@ -52,19 +58,15 @@ export async function generateImage(env, prompt, opts = {}) {
     }
   }
 
-  // FLUX returns no token usage — meter the prompt only (estimated), tagged
-  // as an IMAGE operation so it's distinguishable from chat/text calls.
-  const promptTokenEstimate = estimateTokens(prompt)
-  reportUsage(env, {
+  // FLUX has no token concept — meter as an actual image operation on the
+  // dedicated images endpoint (not token estimates jammed into completions).
+  reportImageUsage(env, {
     model: MODEL,
+    provider: IMAGE_PROVIDER,
     sessionId: opts.sessionId,
-    usage: {
-      inputTokenCount: promptTokenEstimate,
-      outputTokenCount: 0,
-      totalTokenCount: promptTokenEstimate,
-    },
-    operationType: 'IMAGE',
+    agent: opts.agent,
     requestStartTime: callStart,
+    actualImageCount: 1,
     ctx: opts.ctx,
   }).catch(() => {})
 

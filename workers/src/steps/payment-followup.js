@@ -164,7 +164,7 @@ Return JSON with exactly these fields:
       body:    { type: 'string' },
     },
     required: ['subject', 'body'],
-  }, 1500)
+  }, 1500, { agent: 'payment-followup-agent', sessionId: ctx.workflow_run_id })
 
   console.log(`[payment_cf_draft_email] drafted for order=${order.id} customer=${order.customer_name} total=${fmt(total)}`)
 

@@ -338,7 +338,7 @@ Return JSON:
   "product_page_url": "${productUrl}"
 }`
 
-  const outline = await cfAiGenerateJson(env, prompt, SYSTEM, 1000)
+  const outline = await cfAiGenerateJson(env, prompt, SYSTEM, 1000, { agent: 'blog-content-agent', sessionId: ctx.workflow_run_id })
   console.log(`[blog_generate_outline] title="${outline.title}"`)
 
   await nextJob(ctx, 'blog_generate_content', {
@@ -404,16 +404,45 @@ CONTENT RULES:
 8. No bullet points except in section 4 where listing features
 9. Avoid: "In conclusion", "In today's world", "It's important to note", "It goes without saying"
 
-Return JSON:
-{
-  "content": "complete markdown blog post — all 5 sections with ## headings, ~${wordCount} words",
-  "word_count_estimate": 900
-}`
+OUTPUT FORMAT — read carefully:
+Output ONLY the raw markdown blog post itself. Start directly with the first
+"## ${sections[0] || ''}" heading — no title line, no JSON, no code fences,
+no preamble like "Here is the blog post:", no commentary before or after.
+Write the FULL ${wordCount}-word article, not a summary or outline of it.`
 
-  const result  = await cfAiGenerateJson(env, prompt, SYSTEM, 4000)
-  const content = result.content || ''
+  // Plain text, NOT JSON mode. Long-form markdown asked for as an escaped
+  // JSON string value is a known failure mode for this model — it tends to
+  // satisfice with something short and heading-free to keep the JSON easy
+  // to close, even though the prompt clearly asks for ~900 words across 5
+  // headed sections. Generating raw markdown directly avoids that entirely;
+  // this is also why the (short) outline step above doesn't have this
+  // problem — short JSON payloads stay reliable, long ones don't.
+  const content = (await cfAiGenerateText(env, prompt, SYSTEM, 4000, { agent: 'blog-content-agent', sessionId: ctx.workflow_run_id }))
+    .trim()
+    .replace(/^```(?:markdown|md)?\s*/i, '').replace(/```\s*$/i, '') // strip stray fences if the model adds them anyway
+    .trim()
 
-  console.log(`[blog_generate_content] generated ~${result.word_count_estimate || '?'} words`)
+  const wordCountEstimate = content ? content.split(/\s+/).filter(Boolean).length : 0
+  const headingCount = (content.match(/^##\s+/gm) || []).length
+
+  // Fail loudly instead of silently shipping a broken/empty blog post.
+  // job-runner.js already retries on thrown errors (see handleFailure()),
+  // so this turns "quietly published a 2-sentence blog with no headings"
+  // into a visible, retried failure instead.
+  if (wordCountEstimate < Math.round(wordCount * 0.5)) {
+    throw new Error(
+      `Blog content too short: got ~${wordCountEstimate} words, expected ~${wordCount}. ` +
+      `First 200 chars: ${content.slice(0, 200)}`
+    )
+  }
+  if (headingCount < 3) {
+    throw new Error(
+      `Blog content missing headings: found ${headingCount} "## " headings, expected 5. ` +
+      `First 200 chars: ${content.slice(0, 200)}`
+    )
+  }
+
+  console.log(`[blog_generate_content] generated ~${wordCountEstimate} words, ${headingCount} headings`)
 
   // Build image prompt
   const imgPrompt = await buildBlogImagePrompt(env, {
@@ -459,6 +488,8 @@ export async function blogImageSubmit(ctx) {
   const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
     width:  1024,   // Workers AI supports up to 1024 on schnell
     height: 576,    // ~16:9 ratio for blog OG image
+    agent: 'blog-content-agent',
+    sessionId: ctx.workflow_run_id,
   })
 
   await saveBlogAndGoToApproval(ctx, blog, image)
@@ -669,7 +700,7 @@ Rules:
 Output ONLY the prompt text — no preamble, no quotes`
 
   try {
-    return (await cfAiGenerateText(env, instruction, '', 150))
+    return (await cfAiGenerateText(env, instruction, '', 150, { agent: 'blog-content-agent' }))
       .trim().replace(/^"|"$/g, '')
   } catch {
     return `Realistic DSLR editorial photograph of ${product} in a professional industrial setting, natural lighting, sharp focus on product, photorealistic, no text`

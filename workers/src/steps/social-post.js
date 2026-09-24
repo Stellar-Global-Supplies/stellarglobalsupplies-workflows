@@ -367,7 +367,7 @@ Return JSON with these exact keys:
 }`
   }
 
-  const contentData = await cfAiGenerateJson(env, genPrompt, SYSTEM, 3000)
+  const contentData = await cfAiGenerateJson(env, genPrompt, SYSTEM, 3000, { agent: 'social-caption-agent', sessionId: ctx.workflow_run_id })
   console.log(`[social_cf_generate_post] generated title=${contentData.title}`)
 
   const title   = contentData.title || ''
@@ -390,7 +390,7 @@ Output ONLY the prompt text — no explanation, no quotes, no preamble`
 
     const fallbackImgPrompt = `Realistic DSLR commercial photography of ${order.product_name} in a professional industrial setting, natural lighting, sharp focus, photorealistic editorial`
     try {
-      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"+|"+$/g, '').trim()
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180, { agent: 'social-caption-agent', sessionId: ctx.workflow_run_id })).trim().replace(/^"+|"+$/g, '').trim()
     } catch (e) {
       imgPrompt = fallbackImgPrompt
     }
@@ -415,7 +415,7 @@ Output ONLY the prompt — no explanation, no quotes`
 
     const fallbackImgPrompt = `Realistic DSLR photo of a procurement professional reviewing a B2B supply chain dashboard, navy and gold UI, natural lighting, industrial supply catalogue on desk, shallow depth of field, photorealistic`
     try {
-      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180)).trim().replace(/^"+|"+$/g, '').trim()
+      imgPrompt = (await cfAiGenerateText(env, ipPrompt, '', 180, { agent: 'social-caption-agent', sessionId: ctx.workflow_run_id })).trim().replace(/^"+|"+$/g, '').trim()
     } catch (e) {
       imgPrompt = fallbackImgPrompt
     }
@@ -554,7 +554,7 @@ Return JSON with these exact keys:
   "hashtags": ["B2BSupplyChain", "IndustrialSupply", "SteelSupplier", "Procurement", "StellarGlobalSupplies", "MadeInIndia", "B2BIndia"]
 }`
 
-  const contentData = await cfAiGenerateJson(env, genPrompt, TECH_SYSTEM, 3000)
+  const contentData = await cfAiGenerateJson(env, genPrompt, TECH_SYSTEM, 3000, { agent: 'social-caption-agent', sessionId: ctx.workflow_run_id })
   console.log(`[social_tech_generate_post] title="${contentData.title}"`)
 
   const title      = contentData.title || topicName
@@ -631,6 +631,8 @@ export async function socialTechImageSubmit(ctx) {
   const storageKey = `social-posts/tech/${crypto.randomUUID()}`
   const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
     steps: 8, // max diffusion steps for best quality; width/height aren't accepted by this model's schema
+    agent: 'social-caption-agent',
+    sessionId: ctx.workflow_run_id,
   })
 
   if (postId) {
@@ -738,6 +740,8 @@ export async function socialImageSubmit(ctx) {
   const storageKey = `social-posts/${payload.post_type || 'product'}/${crypto.randomUUID()}`
   const image      = await generateAndUploadImage(env, imgPrompt, storageKey, {
     steps: 8, // max diffusion steps for best quality; width/height aren't accepted by this model's schema
+    agent: 'social-caption-agent',
+    sessionId: ctx.workflow_run_id,
   })
 
   // Update social_posts row with image url (or the failure reason) if we have a postId

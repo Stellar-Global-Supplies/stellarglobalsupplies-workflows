@@ -631,7 +631,7 @@ export async function reportUsage(
     model,
     sessionId,
     usage,
-    operationType = "CHAT",
+    operationType = "GENERATE",
     requestStartTime,
     ctx,
 
@@ -965,5 +965,288 @@ export async function reportUsage(
   }
 
   // Background job / workflow context.
+  await run();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI Image Metering — dedicated endpoint, separate from /ai/completions.
+// Images have no token concept (no inputTokenCount/outputTokenCount), so
+// jamming them into the completions endpoint with estimated tokens was
+// wrong. This endpoint bills by actualImageCount + billingUnit instead.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const REVENIUM_IMAGE_METERING_URL =
+  "https://api.revenium.ai/meter/v2/ai/images";
+
+/**
+ * Report one AI image generation/edit operation to Revenium.
+ *
+ * @param {object} env
+ * @param {object} opts
+ * @param {string} opts.model            - e.g. '@cf/black-forest-labs/flux-1-schnell'
+ * @param {string} opts.provider         - the actual model vendor, e.g. 'Black Forest Labs'
+ *                                          (NOT the host — Cloudflare is the host, not the vendor)
+ * @param {string} [opts.sessionId]
+ * @param {string} [opts.agent]          - which agent/step triggered this, e.g. 'blog-content-agent'
+ * @param {number} [opts.requestStartTime]
+ * @param {number} [opts.actualImageCount=1]
+ * @param {string} [opts.resolution]
+ * @param {object} [opts.ctx]            - Cloudflare ExecutionContext, for waitUntil
+ * @param {boolean} [opts.success=true]
+ * @param {string} [opts.errorReason]
+ */
+export async function reportImageUsage(
+  env,
+  {
+    model,
+    provider,
+    sessionId,
+    agent,
+    requestStartTime,
+    actualImageCount = 1,
+    resolution,
+    ctx,
+    success = true,
+    errorReason,
+    traceId,
+    taskType = "image-generation",
+  }
+) {
+  const run = async () => {
+    const apiKey = await getReveniumApiKey(env);
+    const hasApiKey = Boolean(apiKey);
+
+    if (!hasApiKey) {
+      console.warn(
+        "[revenium] REVENIUM_API_KEY not available — skipping image usage report"
+      );
+      return;
+    }
+
+    const requestTime = requestStartTime
+      ? new Date(requestStartTime)
+      : new Date();
+    const responseTime = new Date();
+    const requestDuration = Math.max(
+      1,
+      responseTime.getTime() - requestTime.getTime()
+    );
+
+    const payload = {
+      model: model || "unknown",
+      provider: provider || "unknown",
+
+      requestTime: requestTime.toISOString(),
+      responseTime: responseTime.toISOString(),
+      requestDuration,
+
+      operationType: "IMAGE",
+      billingUnit: "PER_IMAGE",
+      actualImageCount,
+
+      ...(resolution ? { resolution } : {}),
+
+      costType: "AI",
+
+      organizationName: ORGANIZATION_NAME,
+      productName: PRODUCT_NAME,
+
+      taskType,
+
+      subscriber: {
+        id: sessionId || "unknown-session",
+      },
+
+      transactionId: crypto.randomUUID(),
+
+      ...(traceId ? { traceId } : {}),
+      ...(agent ? { agent } : {}),
+      ...(!success ? { errorReason: errorReason || "unknown error" } : {}),
+    };
+
+    try {
+      const response = await fetch(REVENIUM_IMAGE_METERING_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await response.text();
+
+      if (!response.ok) {
+        console.warn(
+          "[revenium] image metering call failed:",
+          JSON.stringify({
+            status: response.status,
+            statusText: response.statusText,
+            body,
+            endpoint: REVENIUM_IMAGE_METERING_URL,
+          })
+        );
+        return;
+      }
+
+      console.log(
+        "[revenium] image metering call SUCCESS:",
+        JSON.stringify({
+          status: response.status,
+          model,
+          provider,
+          actualImageCount,
+          agent,
+          transactionId: payload.transactionId,
+        })
+      );
+    } catch (err) {
+      console.warn("[revenium] image metering call errored:", err?.message || err);
+    }
+  };
+
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(run());
+    return;
+  }
+
+  await run();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Metering — for external tool/API calls that aren't LLM completions
+// at all (Tavily search/extract, and any future non-AI external service).
+// Dedicated endpoint: /meter/v2/tool/events.
+//
+// NOTE: costUsd only auto-calculates if a matching Tool (by toolId) has been
+// registered in Revenium's Tool Registry (dashboard → Tools) with pricing.
+// Until that's set up, these events still report duration/success/agent
+// attribution — cost just shows as null/$0 until the tool is registered.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const REVENIUM_TOOL_METERING_URL =
+  "https://api.revenium.ai/meter/v2/tool/events";
+
+/**
+ * Report one external tool call to Revenium.
+ *
+ * @param {object} env
+ * @param {object} opts
+ * @param {string} opts.toolId           - must match a Tool registered in
+ *                                          Revenium's Tool Registry for cost
+ *                                          to auto-calculate, e.g. 'tavily-search'
+ * @param {string} [opts.operation]      - e.g. 'search', 'extract'
+ * @param {number} [opts.durationMs]
+ * @param {boolean} [opts.success=true]
+ * @param {string} [opts.errorMessage]
+ * @param {string} [opts.agent]
+ * @param {string} [opts.workflowId]     - e.g. ctx.workflow_run_id
+ * @param {string} [opts.agenticJobId]
+ * @param {string} [opts.traceId]
+ * @param {object} [opts.usageMetadata]  - freeform key-value extras (e.g. query, resultCount)
+ * @param {object} [opts.ctx]            - Cloudflare ExecutionContext, for waitUntil
+ */
+export async function reportToolEvent(
+  env,
+  {
+    toolId,
+    operation,
+    durationMs,
+    success = true,
+    errorMessage,
+    agent,
+    workflowId,
+    agenticJobId,
+    traceId,
+    usageMetadata,
+    ctx,
+  }
+) {
+  const run = async () => {
+    const apiKey = await getReveniumApiKey(env);
+    const hasApiKey = Boolean(apiKey);
+
+    if (!hasApiKey) {
+      console.warn(
+        "[revenium] REVENIUM_API_KEY not available — skipping tool event report"
+      );
+      return;
+    }
+
+    if (!toolId) {
+      console.warn("[revenium] reportToolEvent called without toolId — skipping");
+      return;
+    }
+
+    const payload = {
+      toolId,
+      timestamp: new Date().toISOString(),
+
+      ...(operation ? { operation } : {}),
+      ...(durationMs != null ? { durationMs } : {}),
+      success,
+      ...(!success && errorMessage ? { errorMessage } : {}),
+
+      organizationName: ORGANIZATION_NAME,
+      productName: PRODUCT_NAME,
+
+      ...(agent ? { agent } : {}),
+      ...(workflowId ? { workflowId } : {}),
+      ...(agenticJobId ? { agenticJobId } : {}),
+      ...(traceId ? { traceId } : {}),
+      ...(usageMetadata ? { usageMetadata } : {}),
+
+      transactionId: crypto.randomUUID(),
+    };
+
+    try {
+      const response = await fetch(REVENIUM_TOOL_METERING_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await response.text();
+
+      if (!response.ok) {
+        console.warn(
+          "[revenium] tool event call failed:",
+          JSON.stringify({
+            status: response.status,
+            statusText: response.statusText,
+            body,
+            endpoint: REVENIUM_TOOL_METERING_URL,
+          })
+        );
+        return;
+      }
+
+      console.log(
+        "[revenium] tool event call SUCCESS:",
+        JSON.stringify({
+          status: response.status,
+          toolId,
+          operation,
+          durationMs,
+          success,
+          agent,
+          transactionId: payload.transactionId,
+        })
+      );
+    } catch (err) {
+      console.warn("[revenium] tool event call errored:", err?.message || err);
+    }
+  };
+
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(run());
+    return;
+  }
+
   await run();
 }
