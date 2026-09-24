@@ -53,6 +53,8 @@ async function resolveSecret(val) {
   return String(val)
 }
 
+import { reportToolEvent } from '../lib/revenium.js'
+
 const TAVILY_BASE = 'https://api.tavily.com'
 
 // ── Stellar product catalogue ─────────────────────────────────────────────────
@@ -95,17 +97,51 @@ const SKIP_DOMAINS = new Set([
 
 // ── Tavily helpers ────────────────────────────────────────────────────────────
 
-async function tavilySearch(env, query, depth = 'basic', maxResults = 5) {
+async function tavilySearch(env, query, depth = 'basic', maxResults = 5, meta = {}) {
   const apiKey = await resolveSecret(env.TAVILY_API_KEY)
   if (!apiKey) throw new Error('Missing secret: TAVILY_API_KEY')
 
-  const res = await fetch(`${TAVILY_BASE}/search`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ api_key: apiKey, query, search_depth: depth, max_results: maxResults }),
-  })
-  if (!res.ok) throw new Error(`Tavily ${res.status}: ${await res.text()}`)
-  return res.json()
+  const start = Date.now()
+  let res, ok = true, errMsg
+  try {
+    res = await fetch(`${TAVILY_BASE}/search`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ api_key: apiKey, query, search_depth: depth, max_results: maxResults }),
+    })
+    if (!res.ok) {
+      ok = false
+      errMsg = `Tavily ${res.status}: ${await res.text()}`
+      throw new Error(errMsg)
+    }
+    const json = await res.json()
+
+    reportToolEvent(env, {
+      toolId: 'tavily-search',
+      operation: 'search',
+      durationMs: Date.now() - start,
+      success: true,
+      agent: meta.agent || 'lead-gen-agent',
+      workflowId: meta.sessionId,
+      usageMetadata: { query, depth, maxResults, resultCount: (json.results || []).length },
+    }).catch(() => {})
+
+    return json
+  } catch (e) {
+    ok = false
+    errMsg = errMsg || e.message
+    reportToolEvent(env, {
+      toolId: 'tavily-search',
+      operation: 'search',
+      durationMs: Date.now() - start,
+      success: false,
+      errorMessage: errMsg,
+      agent: meta.agent || 'lead-gen-agent',
+      workflowId: meta.sessionId,
+      usageMetadata: { query, depth, maxResults },
+    }).catch(() => {})
+    throw e
+  }
 }
 
 function cleanDomain(url) {
@@ -152,7 +188,7 @@ Return JSON:
 }`
 
   const result = await cfAiExtractJson(env, prompt,
-    'You are a B2B sales intelligence expert. Return valid JSON only.', 400)
+    'You are a B2B sales intelligence expert. Return valid JSON only.', 400, { agent: 'lead-gen-agent', sessionId: ctx.workflow_run_id })
 
   console.log(`[lead_select] location=${location} product=${result.selected_product} industry=${result.selected_industry}`)
 
@@ -189,7 +225,7 @@ export async function leadTavilyFindBuyers(ctx) {
   const allResults = []
   for (const query of queries) {
     try {
-      const result = await tavilySearch(env, query, 'basic', 7)
+      const result = await tavilySearch(env, query, 'basic', 7, { sessionId: ctx.workflow_run_id })
       allResults.push(...(result.results || []))
     } catch (e) {
       console.warn(`[lead_tavily_find_buyers] query failed: ${e.message}`)
@@ -244,7 +280,7 @@ Return JSON:
 
   let selectedIdx = 0
   try {
-    const pick = await cfAiExtractJson(env, pickPrompt, 'Pick the best B2B lead. Return JSON only.', 200)
+    const pick = await cfAiExtractJson(env, pickPrompt, 'Pick the best B2B lead. Return JSON only.', 200, { agent: 'lead-gen-agent', sessionId: ctx.workflow_run_id })
     selectedIdx = Math.min(parseInt(pick.selected_index) || 0, companies.length - 1)
     console.log(`[lead_tavily_find_buyers] picked idx=${selectedIdx} confidence=${pick.confidence} reason=${pick.reason}`)
   } catch (e) {
@@ -401,7 +437,7 @@ export async function leadPromoTavilyFindBuyers(ctx) {
   const allResults = []
   for (const query of queries) {
     try {
-      const result = await tavilySearch(env, query, 'basic', 6)
+      const result = await tavilySearch(env, query, 'basic', 6, { sessionId: ctx.workflow_run_id })
       allResults.push(...(result.results || []))
     } catch (e) {
       console.warn(`[lead_promo_tavily_find_buyers] query failed: ${e.message}`)
@@ -461,7 +497,7 @@ Return JSON:
   let selectedIdx = 0
   try {
     const pick = await cfAiExtractJson(env, pickPrompt,
-      'Pick the best B2B lead matching a medium-to-large recurring-bulk-buyer ICP. Return JSON only.', 220)
+      'Pick the best B2B lead matching a medium-to-large recurring-bulk-buyer ICP. Return JSON only.', 220, { agent: 'lead-gen-agent', sessionId: ctx.workflow_run_id })
     selectedIdx = Math.min(parseInt(pick.selected_index) || 0, companies.length - 1)
     console.log(`[lead_promo_tavily_find_buyers] picked idx=${selectedIdx} confidence=${pick.confidence} reason=${pick.reason}`)
   } catch (e) {
@@ -522,7 +558,7 @@ Extract and return JSON:
 }`
 
   const extracted = await cfAiExtractJson(env, prompt,
-    'Extract structured B2B lead data for a medium-to-large recurring-bulk-buyer ICP. Be accurate — only use what is in the source. Return JSON only.', 500)
+    'Extract structured B2B lead data for a medium-to-large recurring-bulk-buyer ICP. Be accurate — only use what is in the source. Return JSON only.', 500, { agent: 'lead-gen-agent', sessionId: ctx.workflow_run_id })
 
   console.log(`[lead_promo_extract_company] company=${extracted.company_name} product=${product}`)
 
@@ -572,7 +608,7 @@ Extract and return JSON:
 }`
 
   const extracted = await cfAiExtractJson(env, prompt,
-    'Extract structured B2B lead data. Be accurate — only use what is in the source. Return JSON only.', 500)
+    'Extract structured B2B lead data. Be accurate — only use what is in the source. Return JSON only.', 500, { agent: 'lead-gen-agent', sessionId: ctx.workflow_run_id })
 
   console.log(`[lead_cf_extract_company] company=${extracted.company_name}`)
 
@@ -644,17 +680,44 @@ export async function leadCheckDuplicate(ctx) {
 // regex-pulls every email found on those pages.
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function tavilyExtract(env, urls) {
+async function tavilyExtract(env, urls, meta = {}) {
   const apiKey = await resolveSecret(env.TAVILY_API_KEY)
   if (!apiKey) throw new Error('Missing secret: TAVILY_API_KEY')
 
-  const res = await fetch(`${TAVILY_BASE}/extract`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ api_key: apiKey, urls }),
-  })
-  if (!res.ok) throw new Error(`Tavily extract ${res.status}: ${await res.text()}`)
-  return res.json()
+  const start = Date.now()
+  try {
+    const res = await fetch(`${TAVILY_BASE}/extract`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ api_key: apiKey, urls }),
+    })
+    if (!res.ok) throw new Error(`Tavily extract ${res.status}: ${await res.text()}`)
+    const json = await res.json()
+
+    reportToolEvent(env, {
+      toolId: 'tavily-extract',
+      operation: 'extract',
+      durationMs: Date.now() - start,
+      success: true,
+      agent: meta.agent || 'lead-gen-agent',
+      workflowId: meta.sessionId,
+      usageMetadata: { urlCount: urls.length, extractedCount: (json.results || []).length },
+    }).catch(() => {})
+
+    return json
+  } catch (e) {
+    reportToolEvent(env, {
+      toolId: 'tavily-extract',
+      operation: 'extract',
+      durationMs: Date.now() - start,
+      success: false,
+      errorMessage: e.message,
+      agent: meta.agent || 'lead-gen-agent',
+      workflowId: meta.sessionId,
+      usageMetadata: { urlCount: urls.length },
+    }).catch(() => {})
+    throw e
+  }
 }
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
@@ -691,7 +754,7 @@ export async function leadTavilyScrapeWebsite(ctx) {
     ]
 
     try {
-      const result = await tavilyExtract(env, candidateUrls)
+      const result = await tavilyExtract(env, candidateUrls, { sessionId: ctx.workflow_run_id })
       const pages  = (result.results || []).filter(r => r.raw_content)
 
       scrapedContent = pages
@@ -760,7 +823,7 @@ Return JSON:
   "contact_name": "First Last if a name appears near that email, else empty string"
 }`
       const picked = await cfAiExtractJson(env, pickPrompt,
-        'Pick the best business email from a fixed list. Return JSON only.', 200)
+        'Pick the best business email from a fixed list. Return JSON only.', 200, { agent: 'lead-gen-agent', sessionId: ctx.workflow_run_id })
 
       email       = foundEmails.includes((picked.email || '').toLowerCase())
         ? picked.email.toLowerCase()
@@ -922,7 +985,7 @@ Return valid JSON only.`
       body:    { type: 'string' },
     },
     required: ['subject', 'body'],
-  }, 1200)
+  }, 1200, { agent: 'lead-email-agent', sessionId: ctx.workflow_run_id })
 
   console.log(`[lead_gen_draft_email] drafted subject="${draft.subject}" for leadId=${leadId}`)
 
