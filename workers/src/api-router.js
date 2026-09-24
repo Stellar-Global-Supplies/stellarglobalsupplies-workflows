@@ -354,7 +354,7 @@ Rewrite the social media post based on reviewer feedback.
 Return ONLY valid JSON with keys: linkedin, facebook, instagram.
 LinkedIn: 1500+ chars, structured paragraphs. Facebook/Instagram: under 300 chars with 3-5 hashtags.`
 
-    const regen = await cfAiGenerateJson(env, prompt, system, 3000)
+    const regen = await cfAiGenerateJson(env, prompt, system, 3000, { agent: 'social-caption-agent', sessionId: approvalId })
     await d1.update('approval_queue',
       { payload: { ...payload, post: { ...post, ...regen } } },
       { id: approvalId }
@@ -374,7 +374,7 @@ Return JSON: { "title": "...", "excerpt": "...", "content": "full markdown..." }
 Rewrite the blog post based on reviewer feedback.
 Return ONLY valid JSON with keys: title, excerpt, content (full markdown).`
 
-    const regen = await cfAiGenerateJson(env, prompt, system, 4000)
+    const regen = await cfAiGenerateJson(env, prompt, system, 4000, { agent: 'blog-content-agent', sessionId: approvalId })
     await d1.update('approval_queue',
       { payload: { ...payload, blog: { ...blog, ...regen } } },
       { id: approvalId }
