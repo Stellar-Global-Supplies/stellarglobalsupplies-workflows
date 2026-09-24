@@ -98,7 +98,7 @@ Return JSON with exactly these fields:
       body:    { type: 'string' },
     },
     required: ['subject', 'body'],
-  }, 1500)
+  }, 1500, { agent: 'lead-email-agent', sessionId: ctx.workflow_run_id })
   console.log(`[lead_cf_draft_email] drafted for lead=${lead.id} company=${lead.company_name}`)
 
   await nextJob(ctx, 'lead_approval_gate', {
